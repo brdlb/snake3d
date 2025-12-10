@@ -1,0 +1,26 @@
+{
+    "name": "snake3d",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "preview": "vite preview",
+        "lint": "eslint . --ext .ts"
+    },
+    "devDependencies": {
+        "@typescript-eslint/eslint-plugin": "^7.0.0",
+        "@typescript-eslint/parser": "^7.0.0",
+        "eslint": "^8.57.0",
+        "eslint-config-prettier": "^9.0.0",
+        "eslint-plugin-prettier": "^5.0.0",
+        "prettier": "^3.0.0",
+        "typescript": "^5.0.0",
+        "vite": "^5.0.0"
+    },
+    "dependencies": {
+        "three": "^0.160.0",
+        "@types/three": "^0.160.0"
+    }
+}
