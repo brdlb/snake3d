@@ -10,7 +10,7 @@
         "lint": "eslint . --ext .ts",
         "server": "tsx server/index.ts",
         "server:build": "tsc -p server/tsconfig.json",
-        "start": "node server/dist/index.js",
+        "start": "node server-dist/index.js",
         "dev:all": "concurrently \"npm run dev\" \"npm run server\""
     },
     "devDependencies": {
