@@ -1,0 +1,7 @@
+{
+    "name": "snake3d",
+    "compatibility_date": "2025-12-12",
+    "assets": {
+        "directory": "./dist"
+    }
+}
