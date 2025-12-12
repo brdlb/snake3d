@@ -5,7 +5,7 @@ import { networkManager, NetworkStatusUI } from './network';
 // Initialize the game when the DOM is ready
 window.addEventListener('DOMContentLoaded', async () => {
     // Initialize network connection
-    const statusUI = new NetworkStatusUI();
+    new NetworkStatusUI();
 
     try {
         const authResult = await networkManager.connect();
