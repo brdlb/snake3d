@@ -34,9 +34,8 @@ export class NetworkManager {
     private maxReconnectAttempts = 5;
 
     private readonly TOKEN_KEY = 'snake3d_auth_token';
-    private readonly SERVER_URL = import.meta.env.PROD
-        ? window.location.origin
-        : 'http://localhost:3000';
+    private readonly SERVER_URL =
+        import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:3000';
 
     private constructor() {
         this.loadToken();

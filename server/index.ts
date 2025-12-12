@@ -11,15 +11,41 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const httpServer = createServer(app);
 
-// Socket.IO сервер с CORS для разработки
+// Socket.IO сервер с CORS для разработки и продакшена
+const allowedOrigins = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://snake3d.pages.dev', // Cloudflare Pages URL
+    /https:\/\/.*\.pages\.dev$/, // Любые preview деплои на Cloudflare Pages
+];
+
+// Добавляем custom domain если он есть
+if (process.env.FRONTEND_URL) {
+    allowedOrigins.push(process.env.FRONTEND_URL);
+}
+
 const io = new SocketServer(httpServer, {
     cors: {
-        origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+        origin: allowedOrigins,
         methods: ['GET', 'POST'],
+        credentials: true,
     },
 });
 
 const authManager = new AuthManager();
+
+// Middleware
+app.use(express.json());
+
+// Health check endpoint для Render
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        connections: io.engine.clientsCount,
+    });
+});
 
 // Статические файлы для продакшена
 app.use(express.static(path.join(__dirname, '../dist')));

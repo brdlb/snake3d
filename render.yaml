@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: snake3d-server
+    runtime: node
+    env: node
+    region: oregon # Выберите ближайший регион: oregon, frankfurt, singapore
+    plan: free
+    buildCommand: npm install && npm run server:build
+    startCommand: npm run start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        generateValue: true # Render автоматически установит порт
+      - key: FRONTEND_URL
+        value: https://snake3d.pages.dev # Обновите после деплоя на Cloudflare Pages
