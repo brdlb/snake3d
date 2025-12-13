@@ -2,7 +2,12 @@
  * RoomService - бизнес-логика для работы с комнатами
  */
 
-import { getActiveReplays, addReplayToRoom, getRoomMeta } from './RoomRepository.js';
+import {
+    getActiveReplays,
+    addReplayToRoom,
+    getAllRoomSeeds,
+    hasPlayerPlayedInRoom
+} from './RoomRepository.js';
 import type { ReplayData, RoomData, GameOverPayload } from './types.js';
 
 /**
@@ -17,6 +22,50 @@ export async function getRoomData(seed: number): Promise<RoomData> {
     return {
         seed,
         phantoms
+    };
+}
+
+/**
+ * Найти комнату для игрока
+ * 
+ * Логика "One Attempt":
+ * 1. Ищем комнату, в которой игрок ещё не играл
+ * 2. Если все комнаты уже сыграны — генерируем новый случайный seed
+ * 3. Возвращаем данные найденной/новой комнаты
+ */
+export async function findRoomForPlayer(playerId: string): Promise<RoomData> {
+    const allSeeds = await getAllRoomSeeds();
+
+    console.log(`[RoomService] Finding room for player ${playerId.substring(0, 8)}... (${allSeeds.length} rooms exist)`);
+
+    // Ищем комнаты, в которых игрок ещё не играл
+    const unplayedSeeds: string[] = [];
+
+    for (const seed of allSeeds) {
+        const hasPlayed = await hasPlayerPlayedInRoom(seed, playerId);
+        if (!hasPlayed) {
+            unplayedSeeds.push(seed);
+        }
+    }
+
+    console.log(`[RoomService] Player ${playerId.substring(0, 8)} has ${unplayedSeeds.length} unplayed rooms`);
+
+    if (unplayedSeeds.length > 0) {
+        // Выбираем случайную несыгранную комнату
+        const randomIndex = Math.floor(Math.random() * unplayedSeeds.length);
+        const selectedSeed = unplayedSeeds[randomIndex];
+
+        console.log(`[RoomService] Selected existing room: ${selectedSeed}`);
+        return getRoomData(parseInt(selectedSeed, 10));
+    }
+
+    // Все комнаты сыграны — генерируем новую
+    const newSeed = generateRandomSeed();
+    console.log(`[RoomService] All rooms played, generating new seed: ${newSeed}`);
+
+    return {
+        seed: newSeed,
+        phantoms: []
     };
 }
 
@@ -67,24 +116,4 @@ export async function processGameOver(playerId: string, payload: GameOverPayload
  */
 export function generateRandomSeed(): number {
     return Math.floor(Math.random() * 1000000);
-}
-
-/**
- * Проверить, играл ли игрок уже в этой комнате
- * (Для полной реализации "One Attempt" правила)
- */
-export async function hasPlayerPlayedRoom(playerId: string, seed: number): Promise<boolean> {
-    const seedStr = seed.toString();
-    const meta = await getRoomMeta(seedStr);
-
-    // Проверяем, есть ли реплей этого игрока среди активных
-    // Для полной реализации нужно хранить историю всех игроков
-    // Пока проверяем только активных фантомов
-    for (const phantom of meta.active_phantoms) {
-        if (phantom.replayId.includes(playerId.substring(0, 8))) {
-            return true;
-        }
-    }
-
-    return false;
 }

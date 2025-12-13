@@ -1,30 +1,28 @@
-import { networkManager, UserData, AuthResult } from './NetworkManager';
+import { networkManager } from './NetworkManager';
 
 /**
- * UI для отображения статуса подключения к серверу
+ * UI для отображения информации о текущей комнате
  */
 export class NetworkStatusUI {
     private container: HTMLElement;
+    private seedText: HTMLElement;
     private statusDot: HTMLElement;
-    private statusText: HTMLElement;
-    private userInfo: HTMLElement;
 
     constructor() {
         this.container = document.createElement('div');
         this.container.id = 'network-status';
         this.container.innerHTML = `
-            <div class="network-status-inner">
+            <div class="room-info">
                 <span class="status-dot"></span>
-                <span class="status-text">Connecting...</span>
+                <span class="seed-label">Room:</span>
+                <span class="seed-text">---</span>
             </div>
-            <div class="user-info"></div>
         `;
 
         this.applyStyles();
 
         this.statusDot = this.container.querySelector('.status-dot')!;
-        this.statusText = this.container.querySelector('.status-text')!;
-        this.userInfo = this.container.querySelector('.user-info')!;
+        this.seedText = this.container.querySelector('.seed-text')!;
 
         document.body.appendChild(this.container);
 
@@ -38,19 +36,18 @@ export class NetworkStatusUI {
                 position: fixed;
                 top: 10px;
                 right: 10px;
-                background: rgba(30, 30, 30, 0.9);
+                background: rgba(30, 30, 30, 0.85);
                 border: 1px solid rgba(255, 255, 255, 0.1);
                 border-radius: 8px;
-                padding: 8px 12px;
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 12px;
+                padding: 8px 14px;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 13px;
                 color: #fff;
                 z-index: 10000;
                 backdrop-filter: blur(10px);
-                min-width: 120px;
             }
 
-            .network-status-inner {
+            .room-info {
                 display: flex;
                 align-items: center;
                 gap: 8px;
@@ -64,35 +61,22 @@ export class NetworkStatusUI {
                 transition: background 0.3s ease;
             }
 
-            .status-dot.connecting {
-                background: #f59e0b;
-                animation: pulse 1s infinite;
-            }
-
-            .status-dot.connected {
+            .status-dot.online {
                 background: #10b981;
             }
 
-            .status-dot.disconnected {
+            .status-dot.offline {
                 background: #ef4444;
             }
 
-            .user-info {
-                margin-top: 6px;
-                padding-top: 6px;
-                border-top: 1px solid rgba(255, 255, 255, 0.1);
-                font-size: 11px;
-                color: #aaa;
-                display: none;
+            .seed-label {
+                color: #888;
             }
 
-            .user-info.visible {
-                display: block;
-            }
-
-            @keyframes pulse {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.5; }
+            .seed-text {
+                color: #88ffff;
+                font-weight: bold;
+                letter-spacing: 1px;
             }
         `;
         document.head.appendChild(style);
@@ -100,45 +84,19 @@ export class NetworkStatusUI {
 
     private setupEventListeners(): void {
         networkManager.on('connectionStateChange', (state: string) => {
-            this.updateStatus(state);
-        });
-
-        networkManager.on('authenticated', (result: AuthResult) => {
-            this.showUserInfo(result.user, result.isNew);
-        });
-
-        networkManager.on('userDataUpdated', (user: UserData) => {
-            this.updateUserInfo(user);
+            this.updateConnectionStatus(state === 'authenticated');
         });
     }
 
-    private updateStatus(state: string): void {
-        this.statusDot.className = 'status-dot ' + state;
-
-        const statusMap: Record<string, string> = {
-            disconnected: 'Disconnected',
-            connecting: 'Connecting...',
-            connected: 'Connected',
-            authenticated: 'Online',
-        };
-
-        this.statusText.textContent = statusMap[state] || state;
+    private updateConnectionStatus(isOnline: boolean): void {
+        this.statusDot.className = 'status-dot ' + (isOnline ? 'online' : 'offline');
     }
 
-    private showUserInfo(user: UserData, isNew: boolean): void {
-        this.userInfo.classList.add('visible');
-        this.userInfo.innerHTML = `
-            <div>👤 ${user.username}</div>
-            ${isNew ? '<div style="color: #10b981;">✨ New player!</div>' : ''}
-        `;
-    }
-
-    private updateUserInfo(user: UserData): void {
-        this.userInfo.innerHTML = `
-            <div>👤 ${user.username}</div>
-            <div>🏆 Best: ${user.highScore}</div>
-            <div>🎮 Games: ${user.gamesPlayed}</div>
-        `;
+    /**
+     * Обновить отображаемый seed комнаты
+     */
+    public setSeed(seed: number): void {
+        this.seedText.textContent = seed.toString();
     }
 
     public hide(): void {

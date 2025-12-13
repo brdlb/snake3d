@@ -16,22 +16,35 @@ export class Snake {
 
     private lastStepVector: THREE.Vector3 = new THREE.Vector3(0, 0, -1);
 
-    constructor(startPosition: THREE.Vector3 = new THREE.Vector3(0, 0, 0)) {
-        this.reset(startPosition);
+    constructor(startPosition: THREE.Vector3 = new THREE.Vector3(0, 0, 0), startDirection?: THREE.Quaternion) {
+        this.reset(startPosition, startDirection);
     }
 
     public setSpeed(interval: number) {
         this.moveInterval = interval;
     }
 
-    public reset(startPosition: THREE.Vector3) {
+    public reset(startPosition: THREE.Vector3, startDirection?: THREE.Quaternion) {
         this.segments = [];
-        this.segments.push(startPosition.clone());
-        this.segments.push(startPosition.clone().add(new THREE.Vector3(0, 0, 1)));
-        this.segments.push(startPosition.clone().add(new THREE.Vector3(0, 0, 2)));
 
-        this.direction.identity();
-        this.lastStepVector.set(0, 0, -1);
+        // Определяем начальное направление
+        if (startDirection) {
+            this.direction.copy(startDirection);
+        } else {
+            this.direction.identity();
+        }
+
+        // Вычисляем вектор "назад" для размещения хвоста
+        const backVector = new THREE.Vector3(0, 0, 1).applyQuaternion(this.direction);
+
+        // Голова
+        this.segments.push(startPosition.clone());
+        // Хвост располагается позади головы
+        this.segments.push(startPosition.clone().add(backVector.clone()));
+        this.segments.push(startPosition.clone().add(backVector.clone().multiplyScalar(2)));
+
+        // Сохраняем вектор последнего шага (вперёд)
+        this.lastStepVector.set(0, 0, -1).applyQuaternion(this.direction);
         this.accumulatedTime = 0;
         this.growthPending = 0;
     }

@@ -69,13 +69,19 @@ export async function getRoomMeta(seed: string): Promise<RoomMeta> {
 
     try {
         const data = await fs.readFile(metaPath, 'utf-8');
-        return JSON.parse(data) as RoomMeta;
+        const meta = JSON.parse(data) as RoomMeta;
+        // Миграция: добавляем players_history если отсутствует
+        if (!meta.players_history) {
+            meta.players_history = [];
+        }
+        return meta;
     } catch {
         // Комната не существует — создаём пустую
         const newMeta: RoomMeta = {
             seed,
             total_games_played: 0,
-            active_phantoms: []
+            active_phantoms: [],
+            players_history: []
         };
         return newMeta;
     }
@@ -144,6 +150,39 @@ export async function getActiveReplays(seed: string): Promise<ReplayData[]> {
 }
 
 /**
+ * Получить список всех существующих комнат (seeds)
+ */
+export async function getAllRoomSeeds(): Promise<string[]> {
+    try {
+        // Убедимся, что директория существует
+        await fs.mkdir(DATA_DIR, { recursive: true });
+
+        const entries = await fs.readdir(DATA_DIR, { withFileTypes: true });
+        const seeds: string[] = [];
+
+        for (const entry of entries) {
+            if (entry.isDirectory() && entry.name.startsWith('seed_')) {
+                // Извлекаем seed из имени папки "seed_123456"
+                const seed = entry.name.substring(5);
+                seeds.push(seed);
+            }
+        }
+
+        return seeds;
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Проверить, играл ли игрок в комнате
+ */
+export async function hasPlayerPlayedInRoom(seed: string, playerId: string): Promise<boolean> {
+    const meta = await getRoomMeta(seed);
+    return meta.players_history.includes(playerId);
+}
+
+/**
  * Добавить реплей в активные фантомы (с логикой вытеснения)
  * Возвращает true, если реплей был добавлен
  */
@@ -152,6 +191,11 @@ export async function addReplayToRoom(seed: string, replay: ReplayData): Promise
 
     // Увеличиваем счётчик игр
     meta.total_games_played++;
+
+    // Добавляем игрока в историю (если ещё нет)
+    if (!meta.players_history.includes(replay.playerId)) {
+        meta.players_history.push(replay.playerId);
+    }
 
     const newPhantom: PhantomInfo = {
         replayId: replay.id,

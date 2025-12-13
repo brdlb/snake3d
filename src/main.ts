@@ -1,12 +1,9 @@
 import './style.css';
 import { Game } from './core/Game';
-import { networkManager, NetworkStatusUI } from './network';
+import { networkManager } from './network';
 
 // Initialize the game when the DOM is ready
 window.addEventListener('DOMContentLoaded', async () => {
-    // Initialize network connection
-    new NetworkStatusUI();
-
     try {
         const authResult = await networkManager.connect();
         console.log(

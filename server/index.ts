@@ -4,7 +4,7 @@ import { Server as SocketServer } from 'socket.io';
 import { AuthManager } from './auth.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getRoomData, processGameOver, generateRandomSeed } from './room/RoomService.js';
+import { getRoomData, processGameOver, findRoomForPlayer } from './room/RoomService.js';
 import type { GameOverPayload } from './room/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -134,17 +134,23 @@ io.on('connection', (socket) => {
     // =====================================================
 
     // Клиент запрашивает вход в комнату (получение фантомов)
-    socket.on('room:join', async (seed: number | null) => {
+    socket.on('room:join', async (requestedSeed: number | null) => {
         try {
-            // Если seed не указан, генерируем случайный
-            const roomSeed = seed ?? generateRandomSeed();
+            const playerId = socket.data.token || socket.id;
+            let roomData;
 
-            console.log(`[Room] Client ${socket.id} joining room with seed: ${roomSeed}`);
-
-            const roomData = await getRoomData(roomSeed);
+            if (requestedSeed !== null) {
+                // Игрок запросил конкретную комнату
+                console.log(`[Room] Client ${socket.id} requesting specific room: ${requestedSeed}`);
+                roomData = await getRoomData(requestedSeed);
+            } else {
+                // Автоподбор комнаты по правилу "One Attempt"
+                console.log(`[Room] Client ${socket.id} requesting auto-match room`);
+                roomData = await findRoomForPlayer(playerId);
+            }
 
             socket.emit('room:data', roomData);
-            console.log(`[Room] Sent ${roomData.phantoms.length} phantoms to client ${socket.id}`);
+            console.log(`[Room] Sent room ${roomData.seed} with ${roomData.phantoms.length} phantoms to client ${socket.id}`);
         } catch (error) {
             console.error(`[Room] Error joining room:`, error);
             socket.emit('room:error', { message: 'Failed to join room' });

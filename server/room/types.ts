@@ -37,6 +37,8 @@ export interface RoomMeta {
     seed: string;
     total_games_played: number;
     active_phantoms: PhantomInfo[];
+    // История всех игроков (для правила "One Attempt")
+    players_history: string[];
 }
 
 // Данные для отправки клиенту

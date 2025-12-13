@@ -4,6 +4,7 @@ import { InputManager } from './Input';
 import { Snake } from '../entities/Snake';
 import { World, FOOD_COLORS, WORLD_SIZE } from '../entities/World';
 import { Phantom } from '../entities/Phantom';
+import { getSpawnPoint, getRandomSpawnIndex } from '../entities/SpawnPoints';
 import { ParticleSystem } from '../graphics/ParticleSystem';
 
 import { SettingsManager } from './SettingsManager';
@@ -17,6 +18,7 @@ import { WelcomeScreen } from '../ui/WelcomeScreen';
 import { SoundManager } from '../audio/SoundManager';
 import { ReplayRecorder } from './ReplaySystem';
 import { NetworkManager } from '../network/NetworkManager';
+import { NetworkStatusUI } from '../network/NetworkStatusUI';
 import type { ReplayData, RoomData, InputDirection } from '../types/replay';
 
 interface Pulse {
@@ -72,7 +74,9 @@ export class Game {
     private phantomMesh: THREE.InstancedMesh | null = null;
     private replayRecorder: ReplayRecorder | null = null;
     private networkManager: NetworkManager;
+    private networkStatusUI: NetworkStatusUI;
     private currentSeed: number = 0;
+    private playerSpawnIndex: number = 0;
 
     constructor() {
         // 1. Managers Setup
@@ -114,7 +118,11 @@ export class Game {
 
         // 4. Initialize Game Entities
         this.world = new World(WORLD_SIZE);
-        this.snake = new Snake(new THREE.Vector3(WORLD_SIZE / 2, WORLD_SIZE / 2, WORLD_SIZE / 2));
+
+        // Начальная точка спауна (будет обновлена при initializeRoom)
+        this.playerSpawnIndex = getRandomSpawnIndex();
+        const initialSpawn = getSpawnPoint(this.playerSpawnIndex);
+        this.snake = new Snake(initialSpawn.position.clone(), initialSpawn.direction.clone());
 
         this.soundManager = new SoundManager(
             this.sceneManager,
@@ -182,6 +190,9 @@ export class Game {
         // Network Manager
         this.networkManager = NetworkManager.getInstance();
 
+        // Network Status UI (показывает seed комнаты)
+        this.networkStatusUI = new NetworkStatusUI();
+
         // Listen for room data (phantoms)
         this.networkManager.on('room:data', (data: RoomData) => {
             console.log(`[Game] Received room data: seed=${data.seed}, phantoms=${data.phantoms.length}`);
@@ -239,18 +250,28 @@ export class Game {
     private initializeRoom(data: RoomData): void {
         this.currentSeed = data.seed;
 
+        // Обновляем UI с seed комнаты
+        this.networkStatusUI.setSeed(data.seed);
+
         // Обновляем seed в мире для детерминированной генерации еды
         this.world.setSeed(data.seed);
+
+        // Выбираем точку спауна для игрока
+        this.playerSpawnIndex = getRandomSpawnIndex();
+        const spawn = getSpawnPoint(this.playerSpawnIndex);
+
+        // Сбрасываем змейку на выбранную точку спауна
+        this.snake.reset(spawn.position.clone(), spawn.direction.clone());
 
         // Создаём фантомов из данных реплеев
         this.phantoms = data.phantoms.map((replayData: ReplayData, index: number) => {
             return new Phantom(replayData, index);
         });
 
-        console.log(`[Game] Initialized room with seed ${data.seed} and ${this.phantoms.length} phantoms`);
+        console.log(`[Game] Initialized room with seed ${data.seed}, spawn ${this.playerSpawnIndex}, ${this.phantoms.length} phantoms`);
 
-        // Инициализируем запись реплея
-        this.replayRecorder = new ReplayRecorder(data.seed, 0);
+        // Инициализируем запись реплея с индексом спауна
+        this.replayRecorder = new ReplayRecorder(data.seed, this.playerSpawnIndex);
         this.replayRecorder.start();
     }
 
@@ -567,7 +588,6 @@ export class Game {
         this.isGameOver = false;
         this.score = 0;
         this.currentSPM = 300;
-        this.snake.reset(new THREE.Vector3(WORLD_SIZE / 2, WORLD_SIZE / 2, WORLD_SIZE / 2));
         this.snake.setSpeed(60 / this.currentSPM);
         this.particleSystem.clear();
         this.pathfinder.clear();
@@ -577,7 +597,7 @@ export class Game {
         // Reset phantoms
         this.phantoms = [];
 
-        // Request new room from server
+        // Request new room from server (initializeRoom will reset snake position)
         if (this.networkManager.isConnected()) {
             this.networkManager.send('room:join', null);
         } else {

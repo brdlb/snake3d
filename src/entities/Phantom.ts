@@ -8,15 +8,7 @@
 import * as THREE from 'three';
 import { ReplayPlayer } from '../core/ReplaySystem';
 import type { ReplayData, InputDirection } from '../types/replay';
-import { WORLD_SIZE } from './World';
-
-// Точки спавна для фантомов (как в дизайн-документе)
-const SPAWN_POINTS = [
-    { position: new THREE.Vector3(5, 5, 5), direction: new THREE.Quaternion() },
-    { position: new THREE.Vector3(WORLD_SIZE - 5, 5, 5), direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI) },
-    { position: new THREE.Vector3(5, WORLD_SIZE - 5, 5), direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2) },
-    { position: new THREE.Vector3(WORLD_SIZE - 5, WORLD_SIZE - 5, 5), direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2) },
-];
+import { getSpawnPoint, SPAWN_POINTS } from './SpawnPoints';
 
 export class Phantom {
     public segments: THREE.Vector3[] = [];
@@ -56,14 +48,18 @@ export class Phantom {
      */
     public reset(): void {
         const spawnIndex = this.replayPlayer.startParams.spawnIndex % SPAWN_POINTS.length;
-        const spawn = SPAWN_POINTS[spawnIndex];
+        const spawn = getSpawnPoint(spawnIndex);
+
+        this.direction.copy(spawn.direction);
+
+        // Вычисляем вектор "назад" для размещения хвоста
+        const backVector = new THREE.Vector3(0, 0, 1).applyQuaternion(this.direction);
 
         this.segments = [];
         this.segments.push(spawn.position.clone());
-        this.segments.push(spawn.position.clone().add(new THREE.Vector3(0, 0, 1)));
-        this.segments.push(spawn.position.clone().add(new THREE.Vector3(0, 0, 2)));
+        this.segments.push(spawn.position.clone().add(backVector.clone()));
+        this.segments.push(spawn.position.clone().add(backVector.clone().multiplyScalar(2)));
 
-        this.direction.copy(spawn.direction);
         this.lastStepVector.set(0, 0, -1).applyQuaternion(this.direction);
         this.accumulatedTime = 0;
         this.growthPending = 0;
