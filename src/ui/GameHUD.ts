@@ -1,8 +1,18 @@
+/**
+ * Информация об игроке для отображения в HUD
+ */
+export interface PlayerInfo {
+    name: string;
+    score: number;
+    length: number;
+    speed: number;
+    isPlayer?: boolean; // true для текущего игрока
+    color?: string;     // цвет игрока (hex)
+}
+
 export class GameHUD {
     private container!: HTMLElement;
-    private scoreEl!: HTMLElement;
-    private lengthEl!: HTMLElement;
-    private speedEl!: HTMLElement;
+    private playersContainer!: HTMLElement;
 
     constructor() {
         this.createUI();
@@ -12,36 +22,61 @@ export class GameHUD {
         this.container = document.createElement('div');
         this.container.className = 'hud-panel';
 
-        this.scoreEl = this.createStatItem('Score', '0');
-        this.lengthEl = this.createStatItem('Length', '3');
-        this.speedEl = this.createStatItem('Speed', '0');
+        this.playersContainer = document.createElement('div');
+        this.playersContainer.className = 'hud-players';
 
+        this.container.appendChild(this.playersContainer);
         document.body.appendChild(this.container);
     }
 
-    private createStatItem(label: string, initialValue: string): HTMLElement {
-        const item = document.createElement('div');
-        item.className = 'hud-item';
+    /**
+     * Обновить HUD с данными обо всех игроках
+     * @param players - массив информации о всех игроках (включая текущего)
+     */
+    public updatePlayers(players: PlayerInfo[]) {
+        this.playersContainer.innerHTML = '';
 
-        const labelEl = document.createElement('span');
-        labelEl.className = 'hud-label';
-        labelEl.textContent = label;
+        for (const player of players) {
+            const row = document.createElement('div');
+            row.className = 'hud-player-row';
+            if (player.isPlayer) {
+                row.classList.add('hud-player-current');
+            }
 
-        const valueEl = document.createElement('span');
-        valueEl.className = 'hud-value';
-        valueEl.textContent = initialValue;
+            // Цветной индикатор
+            const colorDot = document.createElement('span');
+            colorDot.className = 'hud-player-color';
+            colorDot.style.backgroundColor = player.color || '#ffffff';
 
-        item.appendChild(labelEl);
-        item.appendChild(valueEl);
-        this.container.appendChild(item);
+            // Имя игрока
+            const nameEl = document.createElement('span');
+            nameEl.className = 'hud-player-name';
+            nameEl.textContent = player.name;
 
-        return valueEl;
+            // Статистика
+            const statsEl = document.createElement('span');
+            statsEl.className = 'hud-player-stats';
+            statsEl.textContent = `score:${player.score} length:${player.length} speed:${player.speed}`;
+
+            row.appendChild(colorDot);
+            row.appendChild(nameEl);
+            row.appendChild(statsEl);
+            this.playersContainer.appendChild(row);
+        }
     }
 
+    /**
+     * Обратная совместимость - обновление только для текущего игрока
+     */
     public update(score: number, length: number, speed: number) {
-        this.scoreEl.textContent = score.toString();
-        this.lengthEl.textContent = length.toString();
-        this.speedEl.textContent = speed.toString();
+        this.updatePlayers([{
+            name: 'You',
+            score,
+            length,
+            speed,
+            isPlayer: true,
+            color: '#ffffff'
+        }]);
     }
 
     public dispose() {

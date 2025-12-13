@@ -268,6 +268,10 @@ export class Game {
             return new Phantom(replayData, index);
         });
 
+        // Выводим координаты и направление респавна
+        const spawnDir = new THREE.Vector3(0, 0, 1).applyQuaternion(spawn.direction);
+        console.log(`[Game] Spawn position: (${spawn.position.x}, ${spawn.position.y}, ${spawn.position.z})`);
+        console.log(`[Game] Spawn direction: (${spawnDir.x.toFixed(2)}, ${spawnDir.y.toFixed(2)}, ${spawnDir.z.toFixed(2)})`);
         console.log(`[Game] Initialized room with seed ${data.seed}, spawn ${this.playerSpawnIndex}, ${this.phantoms.length} phantoms`);
 
         // Инициализируем запись реплея с индексом спауна
@@ -364,7 +368,11 @@ export class Game {
 
         // Logic Update
         if (this.snake.update(delta)) {
-            // Step occurred
+            // Step occurred - выводим координаты и направление
+            const stepHead = this.snake.getHead();
+            const stepDir = new THREE.Vector3(0, 0, 1).applyQuaternion(this.snake.direction);
+            console.log(`[Step] Position: (${stepHead.x}, ${stepHead.y}, ${stepHead.z}) Direction: (${stepDir.x.toFixed(2)}, ${stepDir.y.toFixed(2)}, ${stepDir.z.toFixed(2)})`);
+
             // Calculate pitch based on speed (normalize around 300 SPM)
             // Clamp roughly between 0.8 and 1.5 to stay realistic
             let rate = this.currentSPM / 300;
@@ -398,17 +406,21 @@ export class Game {
                         const hex = foodColor.getHex();
                         let spmChange = 10;
                         let growAmount = 1;
+                        let scorePoints = 1;
 
                         // Apply same food effects as player
                         if (hex === FOOD_COLORS.GREEN) {
                             spmChange = 50;
                             growAmount = 3;
+                            scorePoints = 5;
                         } else if (hex === FOOD_COLORS.BLUE) {
                             spmChange = 10;
                             growAmount = 5;
+                            scorePoints = 15;
                         } else if (hex === FOOD_COLORS.PINK) {
                             spmChange = -10;
                             growAmount = 3;
+                            scorePoints = 3;
                         }
 
                         // Apply growth
@@ -418,6 +430,9 @@ export class Game {
 
                         // Apply speed change
                         phantom.applyFoodEffect(spmChange);
+
+                        // Apply score
+                        phantom.addScore(scorePoints);
 
                         // Respawn food when phantom eats it (phantoms compete with player for food)
                         this.world.respawnFood(this.snake.segments, phantomFoodIndex);
@@ -461,10 +476,40 @@ export class Game {
         // Update Particles
         this.particleSystem.update(delta);
 
-        // Update HUD (score is now state-based)
+        // Update HUD with all players info
         const currentLength = this.snake.segments.length;
         const speed = this.snake.getStepsPerMinute();
-        this.hud.update(this.score, currentLength, speed);
+
+        // Build players list for HUD
+        const players = [];
+
+        // Current player first
+        players.push({
+            name: 'You',
+            score: this.score,
+            length: currentLength,
+            speed: speed,
+            isPlayer: true,
+            color: '#ffffff'
+        });
+
+        // Add phantoms
+        for (const phantom of this.phantoms) {
+            if (!phantom.isDeadNow()) {
+                // Use player's readable name
+                const name = phantom.getPlayerName();
+                players.push({
+                    name: name,
+                    score: phantom.getScore(),
+                    length: phantom.segments.length,
+                    speed: phantom.getSPM(),
+                    isPlayer: false,
+                    color: phantom.getColorHex()
+                });
+            }
+        }
+
+        this.hud.updatePlayers(players);
     }
 
     private checkCollisions() {

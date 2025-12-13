@@ -94,6 +94,9 @@ export class ReplayPlayer {
     public readonly startParams: StartParams;
     public readonly deathTick: number;
     public readonly replayId: string;
+    private readonly finalScore: number;
+    private readonly playerId: string;
+    private readonly playerName: string;
     private isDead: boolean = false;
 
     constructor(replayData: ReplayData) {
@@ -101,6 +104,9 @@ export class ReplayPlayer {
         this.startParams = replayData.startParams;
         this.deathTick = replayData.deathTick;
         this.replayId = replayData.id;
+        this.finalScore = replayData.finalScore;
+        this.playerId = replayData.playerId;
+        this.playerName = replayData.playerName || 'Unknown';
     }
 
     /**
@@ -154,4 +160,26 @@ export class ReplayPlayer {
         this.currentTick = 0;
         this.isDead = false;
     }
+
+    /**
+     * Получить финальный счёт
+     */
+    public getFinalScore(): number {
+        return this.finalScore;
+    }
+
+    /**
+     * Получить ID игрока
+     */
+    public getPlayerId(): string {
+        return this.playerId;
+    }
+
+    /**
+     * Получить имя игрока
+     */
+    public getPlayerName(): string {
+        return this.playerName;
+    }
 }
+

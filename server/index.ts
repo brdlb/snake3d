@@ -161,10 +161,20 @@ io.on('connection', (socket) => {
     socket.on('game:over', async (payload: GameOverPayload) => {
         try {
             const playerId = socket.data.token || socket.id;
+            const playerName = socket.data.user?.username || 'Unknown';
 
-            console.log(`[Game] Client ${socket.id} finished game. Score: ${payload.replay?.finalScore}`);
+            console.log(`[Game] Client ${socket.id} (${playerName}) finished game. Score: ${payload.replay?.finalScore}`);
 
-            const result = await processGameOver(playerId, payload);
+            // Добавляем playerName к реплею
+            const payloadWithName = {
+                ...payload,
+                replay: {
+                    ...payload.replay,
+                    playerName
+                }
+            };
+
+            const result = await processGameOver(playerId, payloadWithName);
 
             socket.emit('game:result', result);
             console.log(`[Game] Result for ${socket.id}: ${result.message}`);

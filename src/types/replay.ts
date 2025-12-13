@@ -19,6 +19,7 @@ export interface StartParams {
 export interface ReplayData {
     id: string;
     playerId: string;
+    playerName: string; // Читаемое имя игрока
     timestamp: number;
     startParams: StartParams;
     finalScore: number;

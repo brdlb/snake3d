@@ -24,6 +24,9 @@ export class Phantom {
     // Phantom's own speed tracking (starts at 300 SPM like player)
     private currentSPM: number = 300;
 
+    // Phantom's current score (tracked during gameplay)
+    private currentScore: number = 0;
+
     // Temporary vectors для оптимизации
     private _tempVec: THREE.Vector3 = new THREE.Vector3();
     private _tempQuat: THREE.Quaternion = new THREE.Quaternion();
@@ -68,6 +71,7 @@ export class Phantom {
         this.growthPending = 0;
         this.isDead = false;
         this.currentSPM = 300; // Reset speed to default
+        this.currentScore = 0; // Reset score
 
         this.replayPlayer.reset();
     }
@@ -225,5 +229,47 @@ export class Phantom {
      */
     public getStepProgress(): number {
         return Math.min(this.accumulatedTime / this.moveInterval, 1.0);
+    }
+
+    /**
+     * Получить текущую скорость фантома (SPM)
+     */
+    public getSPM(): number {
+        return this.currentSPM;
+    }
+
+    /**
+     * Получить текущий счёт фантома
+     */
+    public getScore(): number {
+        return this.currentScore;
+    }
+
+    /**
+     * Добавить очки к текущему счёту
+     */
+    public addScore(points: number): void {
+        this.currentScore += points;
+    }
+
+    /**
+     * Получить ID игрока
+     */
+    public getPlayerId(): string {
+        return this.replayPlayer.getPlayerId();
+    }
+
+    /**
+     * Получить имя игрока
+     */
+    public getPlayerName(): string {
+        return this.replayPlayer.getPlayerName();
+    }
+
+    /**
+     * Получить hex цвет
+     */
+    public getColorHex(): string {
+        return '#' + this.phantomColor.getHexString();
     }
 }
