@@ -19,7 +19,7 @@ import { SoundManager } from '../audio/SoundManager';
 import { ReplayRecorder } from './ReplaySystem';
 import { NetworkManager } from '../network/NetworkManager';
 import { NetworkStatusUI } from '../network/NetworkStatusUI';
-import type { ReplayData, RoomData, InputDirection } from '../types/replay';
+import type { ReplayData, RoomData } from '../types/replay';
 
 interface Pulse {
     color: THREE.Color;
@@ -226,22 +226,28 @@ export class Game {
     }
 
     private setupInputs() {
-        const handleTurn = (action: () => void, inputDir: InputDirection) => {
+        const handleTurn = (action: () => void) => {
             const prevDir = this.snake.direction.clone();
             action();
             if (!this.snake.direction.equals(prevDir)) {
                 this.pathfinder.updatePathVisualization(this.snake.getHead(), this.snake.segments, this.snake.direction);
-                // Записываем ввод для реплея
+                // Записываем изменение направления для реплея
                 if (this.replayRecorder) {
-                    this.replayRecorder.recordInput(inputDir);
+                    const head = this.snake.getHead();
+                    const newDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction);
+                    // Snap to grid
+                    if (Math.abs(newDir.x) > 0.5) newDir.set(Math.sign(newDir.x), 0, 0);
+                    else if (Math.abs(newDir.y) > 0.5) newDir.set(0, Math.sign(newDir.y), 0);
+                    else newDir.set(0, 0, Math.sign(newDir.z));
+                    this.replayRecorder.recordDirectionChange(head, newDir);
                 }
             }
         };
 
-        this.input.on('left', () => handleTurn(() => this.snake.rotate(Math.PI / 2), 'TURN_LEFT'));
-        this.input.on('right', () => handleTurn(() => this.snake.rotate(-Math.PI / 2), 'TURN_RIGHT'));
-        this.input.on('rollLeft', () => handleTurn(() => this.snake.roll(-Math.PI / 2), 'ROLL_LEFT'));
-        this.input.on('rollRight', () => handleTurn(() => this.snake.roll(Math.PI / 2), 'ROLL_RIGHT'));
+        this.input.on('left', () => handleTurn(() => this.snake.rotate(Math.PI / 2)));
+        this.input.on('right', () => handleTurn(() => this.snake.rotate(-Math.PI / 2)));
+        this.input.on('rollLeft', () => handleTurn(() => this.snake.roll(-Math.PI / 2)));
+        this.input.on('rollRight', () => handleTurn(() => this.snake.roll(Math.PI / 2)));
     }
 
     /**
@@ -274,9 +280,14 @@ export class Game {
         console.log(`[Game] Spawn direction: (${spawnDir.x.toFixed(2)}, ${spawnDir.y.toFixed(2)}, ${spawnDir.z.toFixed(2)})`);
         console.log(`[Game] Initialized room with seed ${data.seed}, spawn ${this.playerSpawnIndex}, ${this.phantoms.length} phantoms`);
 
-        // Инициализируем запись реплея с индексом спауна
-        this.replayRecorder = new ReplayRecorder(data.seed, this.playerSpawnIndex);
-        this.replayRecorder.start();
+        // Инициализируем запись реплея с индексом спауна и начальной скоростью
+        this.replayRecorder = new ReplayRecorder(data.seed, this.playerSpawnIndex, this.currentSPM);
+        // Начинаем запись с начальным направлением
+        const initialDir = new THREE.Vector3(0, 0, -1).applyQuaternion(spawn.direction);
+        if (Math.abs(initialDir.x) > 0.5) initialDir.set(Math.sign(initialDir.x), 0, 0);
+        else if (Math.abs(initialDir.y) > 0.5) initialDir.set(0, Math.sign(initialDir.y), 0);
+        else initialDir.set(0, 0, Math.sign(initialDir.z));
+        this.replayRecorder.start(initialDir);
     }
 
     /**
@@ -380,11 +391,6 @@ export class Game {
             if (rate > 4.0) rate = 4.0;
 
             this.soundManager.playStep(rate);
-
-            // Tick replay recorder
-            if (this.replayRecorder) {
-                this.replayRecorder.tick();
-            }
 
             this.checkCollisions();
 
@@ -643,14 +649,15 @@ export class Game {
         if (this.replayRecorder) {
             this.replayRecorder.stop();
 
-            const replayData = this.replayRecorder.getReplayData(this.score);
+            const deathPosition = this.snake.getHead();
+            const replayData = this.replayRecorder.getReplayData(this.score, deathPosition);
 
             if (this.networkManager.isConnected()) {
                 this.networkManager.send('game:over', {
                     seed: this.currentSeed,
                     replay: replayData
                 });
-                console.log(`[Game] Sent replay to server. Score: ${this.score}, Ticks: ${replayData.deathTick}`);
+                console.log(`[Game] Sent replay to server. Score: ${this.score}, Changes: ${this.replayRecorder.getChangeCount()}`);
             }
         }
     }

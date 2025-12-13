@@ -86,28 +86,35 @@ export async function processGameOver(playerId: string, payload: GameOverPayload
     const { seed, replay } = payload;
     const seedStr = seed.toString();
 
-    // Базовая валидация
-    if (!replay || !replay.inputLog || !Array.isArray(replay.inputLog)) {
+    // Базовая валидация - проверяем новую модель данных
+    if (!replay || !replay.trajectoryLog || !Array.isArray(replay.trajectoryLog)) {
         return { saved: false, message: 'Invalid replay data' };
     }
 
-    if (replay.finalScore < 0) {
+    if (!replay.startParams || typeof replay.startParams.spawnIndex !== 'number') {
+        return { saved: false, message: 'Invalid start params' };
+    }
+
+    if (replay.finalScore === undefined || replay.finalScore < 0) {
         return { saved: false, message: 'Invalid score' };
     }
 
-    // Минимальная длина игры (хотя бы 1 секунда / ~5 тиков)
-    if (replay.deathTick < 5) {
-        return { saved: false, message: 'Game too short' };
+    if (!replay.deathPosition) {
+        return { saved: false, message: 'Missing death position' };
     }
 
     // Генерируем уникальный ID для реплея
     const replayId = `replay_${playerId.substring(0, 8)}_${Date.now()}`;
 
     const completeReplay: ReplayData = {
-        ...replay,
         id: replayId,
         playerId,
-        timestamp: Date.now()
+        playerName: replay.playerName || `Player_${playerId.substring(0, 4)}`,
+        timestamp: Date.now(),
+        startParams: replay.startParams,
+        finalScore: replay.finalScore,
+        deathPosition: replay.deathPosition,
+        trajectoryLog: replay.trajectoryLog
     };
 
     // Пытаемся добавить реплей в комнату

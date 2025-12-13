@@ -1,36 +1,46 @@
 /**
- * Типы данных для системы комнат и реплеев
+ * Типы данных для системы комнат и реплеев (серверная версия)
+ * 
+ * Новая модель: записываем точки изменения траектории,
+ * а не тики. Это делает воспроизведение независимым от тик-рейта.
  */
 
-// Направление движения змейки
-export type Direction = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT' | 'FORWARD' | 'BACK';
+// 3D вектор для хранения (сериализуемый)
+export interface Vec3 {
+    x: number;
+    y: number;
+    z: number;
+}
 
-// Событие ввода: [тик, направление]
-export type InputEvent = [number, Direction];
+// Событие изменения траектории: позиция + новое направление
+export interface TrajectoryChange {
+    position: Vec3;    // Точка, в которой произошёл поворот
+    direction: Vec3;   // Новый вектор направления (нормализованный, единичный)
+}
 
 // Параметры старта игры
 export interface StartParams {
     seed: number;
     spawnIndex: number;
+    initialSpeed: number;  // Начальная скорость (SPM - steps per minute)
 }
 
 // Полные данные реплея
 export interface ReplayData {
     id: string;
     playerId: string;
-    playerName: string; // Читаемое имя игрока
+    playerName: string;
     timestamp: number;
     startParams: StartParams;
     finalScore: number;
-    deathTick: number;
-    inputLog: InputEvent[];
+    deathPosition: Vec3;           // Позиция смерти
+    trajectoryLog: TrajectoryChange[];  // Лог изменений траектории
 }
 
 // Краткая информация о фантоме для meta.json
 export interface PhantomInfo {
     replayId: string;
     score: number;
-    deathTick: number;
     spawnIndex: number; // Индекс точки спавна (0-3)
 }
 
@@ -53,5 +63,5 @@ export interface RoomData {
 // Результат игры от клиента
 export interface GameOverPayload {
     seed: number;
-    replay: ReplayData;
+    replay: Partial<ReplayData>;
 }

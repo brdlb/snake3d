@@ -1,28 +1,50 @@
 /**
  * ReplaySystem - система записи и воспроизведения игровых сессий
  * 
- * Записывает только изменения состояний (повороты), что даёт
- * экстремально малый размер файла реплея.
+ * Новая модель: записываем точки изменения траектории (позиция + направление),
+ * а не тики. Это делает воспроизведение независимым от тик-рейта.
  */
 
-import type { InputEvent, InputDirection, ReplayData, StartParams } from '../types/replay';
+import * as THREE from 'three';
+import type { Vec3, TrajectoryChange, ReplayData, StartParams } from '../types/replay';
 
+/**
+ * Конвертация THREE.Vector3 в сериализуемый Vec3
+ */
+function toVec3(v: THREE.Vector3): Vec3 {
+    return { x: v.x, y: v.y, z: v.z };
+}
+
+/**
+ * Конвертация Vec3 в THREE.Vector3
+ */
+function fromVec3(v: Vec3): THREE.Vector3 {
+    return new THREE.Vector3(v.x, v.y, v.z);
+}
+
+/**
+ * ReplayRecorder - записывает траекторию игрока
+ * 
+ * Записывает только точки изменения направления:
+ * - Позиция в момент поворота
+ * - Новый вектор направления
+ */
 export class ReplayRecorder {
-    private inputLog: InputEvent[] = [];
-    private currentTick: number = 0;
+    private trajectoryLog: TrajectoryChange[] = [];
     private startParams: StartParams;
     private isRecording: boolean = false;
+    private lastDirection: THREE.Vector3 = new THREE.Vector3();
 
-    constructor(seed: number, spawnIndex: number = 0) {
-        this.startParams = { seed, spawnIndex };
+    constructor(seed: number, spawnIndex: number, initialSpeed: number = 300) {
+        this.startParams = { seed, spawnIndex, initialSpeed };
     }
 
     /**
      * Начать запись
      */
-    public start(): void {
-        this.inputLog = [];
-        this.currentTick = 0;
+    public start(initialDirection: THREE.Vector3): void {
+        this.trajectoryLog = [];
+        this.lastDirection.copy(initialDirection);
         this.isRecording = true;
         console.log('[ReplayRecorder] Recording started');
     }
@@ -32,77 +54,83 @@ export class ReplayRecorder {
      */
     public stop(): void {
         this.isRecording = false;
-        console.log(`[ReplayRecorder] Recording stopped. Total inputs: ${this.inputLog.length}`);
+        console.log(`[ReplayRecorder] Recording stopped. Total trajectory changes: ${this.trajectoryLog.length}`);
     }
 
     /**
-     * Обновить тик (вызывается каждый шаг змейки)
+     * Записать изменение направления
+     * @param position Позиция головы в момент поворота
+     * @param newDirection Новый вектор направления (единичный)
      */
-    public tick(): void {
-        if (this.isRecording) {
-            this.currentTick++;
-        }
-    }
-
-    /**
-     * Записать событие ввода
-     */
-    public recordInput(direction: InputDirection): void {
+    public recordDirectionChange(position: THREE.Vector3, newDirection: THREE.Vector3): void {
         if (!this.isRecording) return;
 
-        this.inputLog.push([this.currentTick, direction]);
-        console.log(`[ReplayRecorder] Input recorded: tick=${this.currentTick}, dir=${direction}`);
-    }
+        // Проверяем, изменилось ли направление
+        if (newDirection.equals(this.lastDirection)) return;
 
-    /**
-     * Получить текущий тик
-     */
-    public getCurrentTick(): number {
-        return this.currentTick;
+        this.trajectoryLog.push({
+            position: toVec3(position),
+            direction: toVec3(newDirection)
+        });
+
+        this.lastDirection.copy(newDirection);
+        console.log(`[ReplayRecorder] Direction change at (${position.x}, ${position.y}, ${position.z}) -> (${newDirection.x}, ${newDirection.y}, ${newDirection.z})`);
     }
 
     /**
      * Получить данные для сохранения реплея
      */
-    public getReplayData(finalScore: number): Partial<ReplayData> {
+    public getReplayData(finalScore: number, deathPosition: THREE.Vector3): Partial<ReplayData> {
         return {
             startParams: this.startParams,
             finalScore,
-            deathTick: this.currentTick,
-            inputLog: [...this.inputLog]
+            deathPosition: toVec3(deathPosition),
+            trajectoryLog: [...this.trajectoryLog]
         };
     }
 
     /**
      * Сбросить состояние записи
      */
-    public reset(seed: number, spawnIndex: number = 0): void {
-        this.inputLog = [];
-        this.currentTick = 0;
-        this.startParams = { seed, spawnIndex };
+    public reset(seed: number, spawnIndex: number, initialSpeed: number = 300): void {
+        this.trajectoryLog = [];
+        this.startParams = { seed, spawnIndex, initialSpeed };
         this.isRecording = false;
+    }
+
+    /**
+     * Получить количество записанных изменений
+     */
+    public getChangeCount(): number {
+        return this.trajectoryLog.length;
     }
 }
 
 /**
  * ReplayPlayer - воспроизводитель записанных игр
+ * 
+ * Воспроизводит траекторию по точкам изменения направления.
+ * Фантом движется по текущему направлению, пока не достигнет
+ * следующей точки поворота в логе.
  */
 export class ReplayPlayer {
-    private inputLog: InputEvent[];
+    private trajectoryLog: TrajectoryChange[];
     private currentIndex: number = 0;
-    private currentTick: number = 0;
     public readonly startParams: StartParams;
-    public readonly deathTick: number;
+    public readonly deathPosition: THREE.Vector3;
     public readonly replayId: string;
     private readonly finalScore: number;
     private readonly playerId: string;
     private readonly playerName: string;
     private isDead: boolean = false;
 
+    // Текущее направление движения
+    private currentDirection: THREE.Vector3 = new THREE.Vector3();
+
     constructor(replayData: ReplayData) {
-        this.inputLog = replayData.inputLog;
+        this.trajectoryLog = replayData.trajectoryLog;
         this.startParams = replayData.startParams;
-        this.deathTick = replayData.deathTick;
+        this.deathPosition = fromVec3(replayData.deathPosition);
         this.replayId = replayData.id;
         this.finalScore = replayData.finalScore;
         this.playerId = replayData.playerId;
@@ -110,32 +138,52 @@ export class ReplayPlayer {
     }
 
     /**
-     * Обновить тик и получить действие, если оно есть
-     * Возвращает направление поворота или null
+     * Проверить и обновить направление на основе текущей позиции
+     * Вызывается каждый шаг фантома
+     * @param currentPosition Текущая позиция головы фантома
+     * @returns Новое направление, если нужно изменить, или null
      */
-    public tick(): InputDirection | null {
+    public checkDirectionChange(currentPosition: THREE.Vector3): THREE.Vector3 | null {
         if (this.isDead) return null;
 
-        this.currentTick++;
-
-        // Проверяем, достиг ли фантом момента смерти
-        if (this.currentTick >= this.deathTick) {
+        // Проверяем смерть
+        if (currentPosition.distanceToSquared(this.deathPosition) < 0.5) {
             this.isDead = true;
-            console.log(`[ReplayPlayer] Phantom ${this.replayId} died at tick ${this.currentTick}`);
+            console.log(`[ReplayPlayer] Phantom ${this.replayId} died at (${currentPosition.x}, ${currentPosition.y}, ${currentPosition.z})`);
             return null;
         }
 
-        // Проверяем, есть ли действие на этом тике
-        if (this.currentIndex < this.inputLog.length) {
-            const [eventTick, direction] = this.inputLog[this.currentIndex];
+        // Проверяем, достигли ли следующей точки поворота
+        if (this.currentIndex < this.trajectoryLog.length) {
+            const nextChange = this.trajectoryLog[this.currentIndex];
+            const targetPos = fromVec3(nextChange.position);
 
-            if (eventTick === this.currentTick) {
+            // Если достигли точки поворота (с небольшим допуском)
+            if (currentPosition.distanceToSquared(targetPos) < 0.5) {
+                const newDirection = fromVec3(nextChange.direction);
+                this.currentDirection.copy(newDirection);
                 this.currentIndex++;
-                return direction;
+
+                console.log(`[ReplayPlayer] Phantom ${this.replayId} changed direction at (${currentPosition.x}, ${currentPosition.y}, ${currentPosition.z})`);
+                return newDirection;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Получить текущее направление
+     */
+    public getCurrentDirection(): THREE.Vector3 {
+        return this.currentDirection.clone();
+    }
+
+    /**
+     * Установить начальное направление
+     */
+    public setInitialDirection(direction: THREE.Vector3): void {
+        this.currentDirection.copy(direction);
     }
 
     /**
@@ -146,19 +194,12 @@ export class ReplayPlayer {
     }
 
     /**
-     * Получить текущий тик
-     */
-    public getCurrentTick(): number {
-        return this.currentTick;
-    }
-
-    /**
      * Сбросить воспроизведение
      */
     public reset(): void {
         this.currentIndex = 0;
-        this.currentTick = 0;
         this.isDead = false;
+        this.currentDirection.set(0, 0, 0);
     }
 
     /**
@@ -181,5 +222,14 @@ export class ReplayPlayer {
     public getPlayerName(): string {
         return this.playerName;
     }
+
+    /**
+     * Получить начальную скорость из реплея
+     */
+    public getInitialSpeed(): number {
+        return this.startParams.initialSpeed;
+    }
 }
 
+// Экспорт вспомогательных функций
+export { toVec3, fromVec3 };

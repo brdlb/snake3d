@@ -200,7 +200,6 @@ export async function addReplayToRoom(seed: string, replay: ReplayData): Promise
     const newPhantom: PhantomInfo = {
         replayId: replay.id,
         score: replay.finalScore,
-        deathTick: replay.deathTick,
         spawnIndex: replay.startParams.spawnIndex
     };
 

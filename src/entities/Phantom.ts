@@ -3,11 +3,15 @@
  * 
  * Визуально похож на змейку, но управляется через ReplayPlayer.
  * Имеет призрачный/полупрозрачный внешний вид.
+ * 
+ * Новая модель: движение управляется точками изменения траектории,
+ * а не тиками. Фантом движется по текущему направлению пока не
+ * достигнет следующей точки поворота.
  */
 
 import * as THREE from 'three';
 import { ReplayPlayer } from '../core/ReplaySystem';
-import type { ReplayData, InputDirection } from '../types/replay';
+import type { ReplayData } from '../types/replay';
 import { getSpawnPoint, SPAWN_POINTS } from './SpawnPoints';
 
 export class Phantom {
@@ -21,17 +25,17 @@ export class Phantom {
     private growthPending: number = 0;
     private isDead: boolean = false;
 
-    // Phantom's own speed tracking (starts at 300 SPM like player)
+    // Phantom's own speed tracking
     private currentSPM: number = 300;
 
     // Phantom's current score (tracked during gameplay)
     private currentScore: number = 0;
 
+    // Текущий вектор направления движения (единичный, snap to grid)
+    private moveDirection: THREE.Vector3 = new THREE.Vector3();
+
     // Temporary vectors для оптимизации
     private _tempVec: THREE.Vector3 = new THREE.Vector3();
-    private _tempQuat: THREE.Quaternion = new THREE.Quaternion();
-    private _axis: THREE.Vector3 = new THREE.Vector3();
-    private lastStepVector: THREE.Vector3 = new THREE.Vector3(0, 0, -1);
 
     constructor(replayData: ReplayData, colorIndex: number = 0) {
         this.replayPlayer = new ReplayPlayer(replayData);
@@ -44,6 +48,9 @@ export class Phantom {
             0x88ff88, // Green ghost
         ];
         this.phantomColor = new THREE.Color(phantomColors[colorIndex % phantomColors.length]);
+
+        // Используем начальную скорость из реплея
+        this.currentSPM = this.replayPlayer.getInitialSpeed();
 
         // Инициализация позиции на основе spawnIndex
         this.reset();
@@ -58,22 +65,37 @@ export class Phantom {
 
         this.direction.copy(spawn.direction);
 
+        // Вычисляем начальный вектор направления движения
+        this.moveDirection.set(0, 0, -1).applyQuaternion(this.direction);
+        this.snapDirectionToGrid(this.moveDirection);
+
+        // Устанавливаем начальное направление в ReplayPlayer
+        this.replayPlayer.setInitialDirection(this.moveDirection);
+
         // Вычисляем вектор "назад" для размещения хвоста
-        const backVector = new THREE.Vector3(0, 0, 1).applyQuaternion(this.direction);
+        const backVector = this.moveDirection.clone().negate();
 
         this.segments = [];
         this.segments.push(spawn.position.clone());
         this.segments.push(spawn.position.clone().add(backVector.clone()));
         this.segments.push(spawn.position.clone().add(backVector.clone().multiplyScalar(2)));
 
-        this.lastStepVector.set(0, 0, -1).applyQuaternion(this.direction);
         this.accumulatedTime = 0;
         this.growthPending = 0;
         this.isDead = false;
-        this.currentSPM = 300; // Reset speed to default
-        this.currentScore = 0; // Reset score
+        this.currentSPM = this.replayPlayer.getInitialSpeed();
+        this.currentScore = 0;
 
         this.replayPlayer.reset();
+    }
+
+    /**
+     * Привязать направление к сетке (единичный вектор по одной оси)
+     */
+    private snapDirectionToGrid(dir: THREE.Vector3): void {
+        if (Math.abs(dir.x) > 0.5) dir.set(Math.sign(dir.x), 0, 0);
+        else if (Math.abs(dir.y) > 0.5) dir.set(0, Math.sign(dir.y), 0);
+        else dir.set(0, 0, Math.sign(dir.z));
     }
 
     /**
@@ -100,8 +122,9 @@ export class Phantom {
         if (this.accumulatedTime >= this.moveInterval) {
             this.accumulatedTime -= this.moveInterval;
 
-            // Получаем действие из реплея
-            const action = this.replayPlayer.tick();
+            // Проверяем, нужно ли изменить направление (по позиции)
+            const currentHead = this.getHead();
+            const newDirection = this.replayPlayer.checkDirectionChange(currentHead);
 
             // Проверяем смерть по реплею
             if (this.replayPlayer.isDeadNow()) {
@@ -109,9 +132,9 @@ export class Phantom {
                 return false;
             }
 
-            // Применяем действие
-            if (action) {
-                this.applyAction(action);
+            // Применяем новое направление если есть
+            if (newDirection) {
+                this.setMoveDirection(newDirection);
             }
 
             // Делаем шаг
@@ -123,38 +146,27 @@ export class Phantom {
     }
 
     /**
-     * Применить действие из реплея
+     * Установить новое направление движения
      */
-    private applyAction(action: InputDirection): void {
-        switch (action) {
-            case 'TURN_LEFT':
-                this.rotate(Math.PI / 2);
-                break;
-            case 'TURN_RIGHT':
-                this.rotate(-Math.PI / 2);
-                break;
-            case 'ROLL_LEFT':
-                this.roll(-Math.PI / 2);
-                break;
-            case 'ROLL_RIGHT':
-                this.roll(Math.PI / 2);
-                break;
-        }
+    private setMoveDirection(newDir: THREE.Vector3): void {
+        this.moveDirection.copy(newDir);
+        this.snapDirectionToGrid(this.moveDirection);
+
+        // Обновляем кватернион для визуализации головы
+        // Направление "вперёд" это -Z, поэтому инвертируем
+        this._tempVec.copy(this.moveDirection).negate();
+
+        // Создаём кватернион из направления
+        const up = new THREE.Vector3(0, 1, 0);
+        const matrix = new THREE.Matrix4();
+        matrix.lookAt(new THREE.Vector3(0, 0, 0), this._tempVec, up);
+        this.direction.setFromRotationMatrix(matrix);
     }
 
     /**
      * Сделать шаг вперёд
      */
     private step(): void {
-        this._tempVec.set(0, 0, -1).applyQuaternion(this.direction);
-
-        // Snap to grid
-        if (Math.abs(this._tempVec.x) > 0.5) this._tempVec.set(Math.sign(this._tempVec.x), 0, 0);
-        else if (Math.abs(this._tempVec.y) > 0.5) this._tempVec.set(0, Math.sign(this._tempVec.y), 0);
-        else this._tempVec.set(0, 0, Math.sign(this._tempVec.z));
-
-        this.lastStepVector.copy(this._tempVec);
-
         let newHead: THREE.Vector3;
 
         if (this.growthPending > 0) {
@@ -165,35 +177,8 @@ export class Phantom {
             newHead = tail || new THREE.Vector3();
         }
 
-        newHead.copy(this.segments[0]).add(this._tempVec);
+        newHead.copy(this.segments[0]).add(this.moveDirection);
         this.segments.unshift(newHead);
-    }
-
-    /**
-     * Поворот влево/вправо
-     */
-    private rotate(angle: number): void {
-        this._axis.set(0, 1, 0);
-        this._tempQuat.setFromAxisAngle(this._axis, angle);
-
-        const nextQuat = this.direction.clone().multiply(this._tempQuat).normalize();
-        const nextForward = new THREE.Vector3(0, 0, -1).applyQuaternion(nextQuat);
-
-        if (nextForward.dot(this.lastStepVector) < -0.5) {
-            return;
-        }
-
-        this.direction.copy(nextQuat);
-    }
-
-    /**
-     * Крен влево/вправо
-     */
-    private roll(angle: number): void {
-        this._axis.set(0, 0, -1);
-        this._tempQuat.setFromAxisAngle(this._axis, angle);
-        this.direction.multiply(this._tempQuat);
-        this.direction.normalize();
     }
 
     /**
@@ -271,5 +256,12 @@ export class Phantom {
      */
     public getColorHex(): string {
         return '#' + this.phantomColor.getHexString();
+    }
+
+    /**
+     * Получить текущее направление движения
+     */
+    public getMoveDirection(): THREE.Vector3 {
+        return this.moveDirection.clone();
     }
 }
