@@ -418,7 +418,8 @@ export class Game {
                         // Apply speed change
                         phantom.applyFoodEffect(spmChange);
 
-                        // Don't respawn food for phantoms - they eat the same seeded food
+                        // Respawn food when phantom eats it (phantoms compete with player for food)
+                        this.world.respawnFood(this.snake.segments, phantomFoodIndex);
                     }
                 }
             }
