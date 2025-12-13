@@ -40,16 +40,16 @@ export class SceneManager {
         this.scene.add(this.ambientLight);
 
         this.directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-        this.directionalLight.position.set(20, 30, 20);
+        this.directionalLight.position.set(45, 55, 45); // Positioned for world center around (25,25,25)
         this.directionalLight.castShadow = true;
         this.directionalLight.shadow.mapSize.width = 2048;
         this.directionalLight.shadow.mapSize.height = 2048;
         this.directionalLight.shadow.camera.near = 0.1;
-        this.directionalLight.shadow.camera.far = 100;
-        this.directionalLight.shadow.camera.left = -50;
-        this.directionalLight.shadow.camera.right = 50;
-        this.directionalLight.shadow.camera.top = 50;
-        this.directionalLight.shadow.camera.bottom = -50;
+        this.directionalLight.shadow.camera.far = 150;
+        this.directionalLight.shadow.camera.left = -60;
+        this.directionalLight.shadow.camera.right = 60;
+        this.directionalLight.shadow.camera.top = 60;
+        this.directionalLight.shadow.camera.bottom = -60;
         this.scene.add(this.directionalLight);
 
         window.addEventListener('resize', this.onWindowResize.bind(this));
@@ -68,10 +68,13 @@ export class SceneManager {
         return this.audioListener;
     }
 
-    public setupWalls(boundary: number) {
-        const boundarySize = boundary * 2 + 1;
-        const boundaryGeo = new THREE.BoxGeometry(boundarySize, boundarySize, boundarySize);
+    public setupWalls(size: number) {
+        // Add 1 to size so walls visually contain segments at positions 0 and size
+        const wallSize = size + 1;
+        const boundaryGeo = new THREE.BoxGeometry(wallSize, wallSize, wallSize);
         this.wallMesh = new THREE.Mesh(boundaryGeo, WallMaterial);
+        // Position so that the playable area spans from 0 to size
+        this.wallMesh.position.set(size / 2, size / 2, size / 2);
         this.scene.add(this.wallMesh);
     }
 

@@ -103,7 +103,7 @@ export class Game {
 
         // 4. Initialize Game Entities
         this.world = new World(WORLD_SIZE);
-        this.snake = new Snake(new THREE.Vector3(0, 0, 0));
+        this.snake = new Snake(new THREE.Vector3(WORLD_SIZE / 2, WORLD_SIZE / 2, WORLD_SIZE / 2));
 
         this.soundManager = new SoundManager(
             this.sceneManager,
@@ -147,7 +147,7 @@ export class Game {
         this.sceneManager.scene.add(this.foodMesh);
 
         // Scene Walls
-        this.sceneManager.setupWalls(this.world.boundary);
+        this.sceneManager.setupWalls(this.world.size);
 
         // Particles
         this.particleSystem = new ParticleSystem(this.sceneManager.scene, texture);
@@ -418,7 +418,7 @@ export class Game {
         this.isGameOver = false;
         this.score = 0;
         this.currentSPM = 300;
-        this.snake.reset(new THREE.Vector3(0, 0, 0));
+        this.snake.reset(new THREE.Vector3(WORLD_SIZE / 2, WORLD_SIZE / 2, WORLD_SIZE / 2));
         this.snake.setSpeed(60 / this.currentSPM);
         this.world.respawnFood([]);
         this.particleSystem.clear();

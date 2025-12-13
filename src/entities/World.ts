@@ -7,25 +7,24 @@ export const FOOD_COLORS = {
     PINK: 0xf85bfd
 };
 
-export const WORLD_SIZE = 25;
+export const WORLD_SIZE = 50;
 
 export class World {
-    public readonly boundary: number;
+    public readonly size: number;
     public foodPositions: THREE.Vector3[] = [];
     public foodColors: THREE.Color[] = [];
     public foodSounds: number[] = [];
     public readonly FOOD_COUNT = 200;
 
     constructor(size: number = WORLD_SIZE) {
-        // Validation removed to allow size 26
-        this.boundary = size;
+        this.size = size;
         this.respawnFood([]);
     }
 
     public isOutOfBounds(position: THREE.Vector3): boolean {
-        return Math.abs(position.x) > this.boundary ||
-            Math.abs(position.y) > this.boundary ||
-            Math.abs(position.z) > this.boundary;
+        return position.x < 0 || position.x > this.size ||
+            position.y < 0 || position.y > this.size ||
+            position.z < 0 || position.z > this.size;
     }
 
     public checkSelfCollision(segments: THREE.Vector3[]): boolean {
@@ -51,13 +50,10 @@ export class World {
     }
 
     public respawnFood(snakeSegments: THREE.Vector3[], index: number = -1) {
-        const range = this.boundary * 2;
-        const min = -this.boundary;
-
         const generatePos = () => {
-            const x = Math.floor(Math.random() * (range + 1)) + min;
-            const y = Math.floor(Math.random() * (range + 1)) + min;
-            const z = Math.floor(Math.random() * (range + 1)) + min;
+            const x = Math.floor(Math.random() * (this.size + 1));
+            const y = Math.floor(Math.random() * (this.size + 1));
+            const z = Math.floor(Math.random() * (this.size + 1));
             return new THREE.Vector3(x, y, z);
         };
 

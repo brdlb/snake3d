@@ -113,9 +113,7 @@ export class NetworkManager {
             this.socket = io(this.SERVER_URL, {
                 transports: ['websocket', 'polling'],
                 timeout: 10000,
-                reconnection: true,
-                reconnectionAttempts: this.maxReconnectAttempts,
-                reconnectionDelay: 1000,
+                reconnection: false,
             });
 
             this.socket.on('connect', () => {
