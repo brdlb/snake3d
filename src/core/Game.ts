@@ -377,26 +377,51 @@ export class Game {
                 this.replayRecorder.tick();
             }
 
-            // Update phantoms
-            for (const phantom of this.phantoms) {
-                if (!phantom.isDeadNow()) {
-                    phantom.setSpeed(60 / this.currentSPM);
-                    phantom.update(delta);
-
-                    // Check if phantom eats food (they grow too!)
-                    const phantomHead = phantom.getHead();
-                    const phantomFoodIndex = this.world.checkFoodCollision(phantomHead);
-                    if (phantomFoodIndex !== -1) {
-                        phantom.grow();
-                        // Don't respawn food for phantoms - they eat the same seeded food
-                    }
-                }
-            }
-
             this.checkCollisions();
 
             // Update Pathfinder on Step
             this.pathfinder.updatePathVisualization(this.snake.getHead(), this.snake.segments, this.snake.direction);
+        }
+
+        // Update phantoms every frame (independently of player step)
+        for (const phantom of this.phantoms) {
+            if (!phantom.isDeadNow()) {
+                // Phantom manages its own speed internally
+                if (phantom.update(delta)) {
+                    // Phantom made a step - check if it eats food
+                    const phantomHead = phantom.getHead();
+                    const phantomFoodIndex = this.world.checkFoodCollision(phantomHead);
+                    if (phantomFoodIndex !== -1) {
+                        // Determine effects based on food color (same as player)
+                        const foodColor = this.world.foodColors[phantomFoodIndex];
+                        const hex = foodColor.getHex();
+                        let spmChange = 10;
+                        let growAmount = 1;
+
+                        // Apply same food effects as player
+                        if (hex === FOOD_COLORS.GREEN) {
+                            spmChange = 50;
+                            growAmount = 3;
+                        } else if (hex === FOOD_COLORS.BLUE) {
+                            spmChange = 10;
+                            growAmount = 5;
+                        } else if (hex === FOOD_COLORS.PINK) {
+                            spmChange = -10;
+                            growAmount = 3;
+                        }
+
+                        // Apply growth
+                        for (let i = 0; i < growAmount; i++) {
+                            phantom.grow();
+                        }
+
+                        // Apply speed change
+                        phantom.applyFoodEffect(spmChange);
+
+                        // Don't respawn food for phantoms - they eat the same seeded food
+                    }
+                }
+            }
         }
 
         const head = this.snake.getHead();

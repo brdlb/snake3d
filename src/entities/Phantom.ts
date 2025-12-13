@@ -21,6 +21,9 @@ export class Phantom {
     private growthPending: number = 0;
     private isDead: boolean = false;
 
+    // Phantom's own speed tracking (starts at 300 SPM like player)
+    private currentSPM: number = 300;
+
     // Temporary vectors для оптимизации
     private _tempVec: THREE.Vector3 = new THREE.Vector3();
     private _tempQuat: THREE.Quaternion = new THREE.Quaternion();
@@ -64,15 +67,18 @@ export class Phantom {
         this.accumulatedTime = 0;
         this.growthPending = 0;
         this.isDead = false;
+        this.currentSPM = 300; // Reset speed to default
 
         this.replayPlayer.reset();
     }
 
     /**
-     * Установить скорость движения
+     * Apply food effect to phantom (speed change based on food color)
+     * @param spmChange - Speed change in steps per minute (positive = faster, negative = slower)
      */
-    public setSpeed(interval: number): void {
-        this.moveInterval = interval;
+    public applyFoodEffect(spmChange: number): void {
+        this.currentSPM += spmChange;
+        if (this.currentSPM < 60) this.currentSPM = 60; // Minimum speed cap
     }
 
     /**
@@ -81,6 +87,9 @@ export class Phantom {
      */
     public update(delta: number): boolean {
         if (this.isDead) return false;
+
+        // Update move interval based on phantom's own speed
+        this.moveInterval = 60 / this.currentSPM;
 
         this.accumulatedTime += delta;
 
