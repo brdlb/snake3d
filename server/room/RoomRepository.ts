@@ -200,7 +200,8 @@ export async function addReplayToRoom(seed: string, replay: ReplayData): Promise
     const newPhantom: PhantomInfo = {
         replayId: replay.id,
         score: replay.finalScore,
-        deathTick: replay.deathTick
+        deathTick: replay.deathTick,
+        spawnIndex: replay.startParams.spawnIndex
     };
 
     if (meta.active_phantoms.length < MAX_PHANTOMS) {
@@ -208,7 +209,7 @@ export async function addReplayToRoom(seed: string, replay: ReplayData): Promise
         meta.active_phantoms.push(newPhantom);
         await saveReplay(seed, replay);
         await saveRoomMeta(seed, meta);
-        console.log(`[Room ${seed}] Added replay ${replay.id} (score: ${replay.finalScore}). Total phantoms: ${meta.active_phantoms.length}`);
+        console.log(`[Room ${seed}] Added replay ${replay.id} (score: ${replay.finalScore}, spawn: ${newPhantom.spawnIndex}). Total phantoms: ${meta.active_phantoms.length}`);
         return true;
     }
 
@@ -245,4 +246,63 @@ export async function addReplayToRoom(seed: string, replay: ReplayData): Promise
     await saveRoomMeta(seed, meta);
     console.log(`[Room ${seed}] Replay ${replay.id} (score: ${replay.finalScore}) did not beat worst score (${worstScore})`);
     return false;
+}
+
+/**
+ * Получить занятые точки спавна в комнате
+ */
+export async function getOccupiedSpawnIndices(seed: string): Promise<number[]> {
+    const meta = await getRoomMeta(seed);
+    return meta.active_phantoms
+        .filter(p => p.spawnIndex !== undefined)
+        .map(p => p.spawnIndex);
+}
+
+/**
+ * Найти свободную точку спавна или вытеснить слабейшего игрока
+ * Возвращает: { spawnIndex: number, evictedReplayId?: string }
+ */
+export async function assignSpawnIndex(seed: string): Promise<{ spawnIndex: number; evictedReplayId?: string }> {
+    const meta = await getRoomMeta(seed);
+
+    // Получаем занятые точки
+    const occupiedIndices = meta.active_phantoms
+        .filter(p => p.spawnIndex !== undefined)
+        .map(p => p.spawnIndex);
+
+    // Ищем свободную точку (0-3)
+    for (let i = 0; i < MAX_PHANTOMS; i++) {
+        if (!occupiedIndices.includes(i)) {
+            console.log(`[Room ${seed}] Found free spawn index: ${i}`);
+            return { spawnIndex: i };
+        }
+    }
+
+    // Все точки заняты — вытесняем слабейшего игрока
+    console.log(`[Room ${seed}] All spawn points occupied, evicting weakest phantom`);
+
+    let worstIndex = 0;
+    let worstScore = meta.active_phantoms[0].score;
+
+    for (let i = 1; i < meta.active_phantoms.length; i++) {
+        if (meta.active_phantoms[i].score < worstScore) {
+            worstScore = meta.active_phantoms[i].score;
+            worstIndex = i;
+        }
+    }
+
+    const evictedPhantom = meta.active_phantoms[worstIndex];
+    const evictedSpawnIndex = evictedPhantom.spawnIndex ?? 0;
+    const evictedReplayId = evictedPhantom.replayId;
+
+    // Удаляем старый реплей из файловой системы
+    await deleteReplay(seed, evictedReplayId);
+
+    // Удаляем фантома из списка активных
+    meta.active_phantoms.splice(worstIndex, 1);
+    await saveRoomMeta(seed, meta);
+
+    console.log(`[Room ${seed}] Evicted phantom ${evictedReplayId} (score: ${worstScore}) to free spawn index ${evictedSpawnIndex}`);
+
+    return { spawnIndex: evictedSpawnIndex, evictedReplayId };
 }

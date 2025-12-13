@@ -6,22 +6,29 @@ import {
     getActiveReplays,
     addReplayToRoom,
     getAllRoomSeeds,
-    hasPlayerPlayedInRoom
+    hasPlayerPlayedInRoom,
+    assignSpawnIndex
 } from './RoomRepository.js';
 import type { ReplayData, RoomData, GameOverPayload } from './types.js';
 
 /**
- * Получить данные комнаты для клиента (seed + активные фантомы)
+ * Получить данные комнаты для клиента (seed + активные фантомы + назначенная точка спавна)
  */
 export async function getRoomData(seed: number): Promise<RoomData> {
     const seedStr = seed.toString();
+
+    // Назначаем точку спавна для игрока
+    const { spawnIndex } = await assignSpawnIndex(seedStr);
+
+    // Получаем оставшихся активных фантомов (после возможного вытеснения)
     const phantoms = await getActiveReplays(seedStr);
 
-    console.log(`[RoomService] getRoomData for seed ${seed}: ${phantoms.length} phantoms`);
+    console.log(`[RoomService] getRoomData for seed ${seed}: ${phantoms.length} phantoms, player spawn: ${spawnIndex}`);
 
     return {
         seed,
-        phantoms
+        phantoms,
+        playerSpawnIndex: spawnIndex
     };
 }
 
@@ -63,9 +70,11 @@ export async function findRoomForPlayer(playerId: string): Promise<RoomData> {
     const newSeed = generateRandomSeed();
     console.log(`[RoomService] All rooms played, generating new seed: ${newSeed}`);
 
+    // В новой комнате игрок получает точку спавна 0
     return {
         seed: newSeed,
-        phantoms: []
+        phantoms: [],
+        playerSpawnIndex: 0
     };
 }
 

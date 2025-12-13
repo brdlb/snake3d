@@ -30,6 +30,7 @@ export interface PhantomInfo {
     replayId: string;
     score: number;
     deathTick: number;
+    spawnIndex: number; // Индекс точки спавна (0-3)
 }
 
 // Метаданные комнаты
@@ -45,6 +46,7 @@ export interface RoomMeta {
 export interface RoomData {
     seed: number;
     phantoms: ReplayData[];
+    playerSpawnIndex: number; // Назначенная сервером точка спавна (0-3)
 }
 
 // Результат игры от клиента

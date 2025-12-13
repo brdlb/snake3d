@@ -30,6 +30,7 @@ export interface ReplayData {
 export interface RoomData {
     seed: number;
     phantoms: ReplayData[];
+    playerSpawnIndex: number; // Назначенная сервером точка спавна (0-3)
 }
 
 // Payload для отправки результата игры на сервер

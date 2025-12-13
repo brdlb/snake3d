@@ -256,8 +256,8 @@ export class Game {
         // Обновляем seed в мире для детерминированной генерации еды
         this.world.setSeed(data.seed);
 
-        // Выбираем точку спауна для игрока
-        this.playerSpawnIndex = getRandomSpawnIndex();
+        // Используем точку спавна, назначенную сервером
+        this.playerSpawnIndex = data.playerSpawnIndex;
         const spawn = getSpawnPoint(this.playerSpawnIndex);
 
         // Сбрасываем змейку на выбранную точку спауна
@@ -287,9 +287,10 @@ export class Game {
         if (this.networkManager.isConnected()) {
             this.networkManager.send('room:join', null);
         } else {
-            // Оффлайн режим — генерируем локальный seed
+            // Оффлайн режим — генерируем локальный seed и случайный spawnIndex
             const localSeed = Math.floor(Math.random() * 1000000);
-            this.initializeRoom({ seed: localSeed, phantoms: [] });
+            const localSpawnIndex = getRandomSpawnIndex();
+            this.initializeRoom({ seed: localSeed, phantoms: [], playerSpawnIndex: localSpawnIndex });
         }
 
         // Снимаем флаг ожидания старта
@@ -627,9 +628,10 @@ export class Game {
         if (this.networkManager.isConnected()) {
             this.networkManager.send('room:join', null);
         } else {
-            // Offline mode - generate new local seed
+            // Offline mode - generate new local seed and random spawn
             const localSeed = Math.floor(Math.random() * 1000000);
-            this.initializeRoom({ seed: localSeed, phantoms: [] });
+            const localSpawnIndex = getRandomSpawnIndex();
+            this.initializeRoom({ seed: localSeed, phantoms: [], playerSpawnIndex: localSpawnIndex });
         }
     }
 
