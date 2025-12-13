@@ -287,7 +287,7 @@ export class Game {
         if (Math.abs(initialDir.x) > 0.5) initialDir.set(Math.sign(initialDir.x), 0, 0);
         else if (Math.abs(initialDir.y) > 0.5) initialDir.set(0, Math.sign(initialDir.y), 0);
         else initialDir.set(0, 0, Math.sign(initialDir.z));
-        this.replayRecorder.start(initialDir);
+        this.replayRecorder.start(initialDir, spawn.position);
     }
 
     /**
@@ -441,7 +441,9 @@ export class Game {
                         phantom.addScore(scorePoints);
 
                         // Respawn food when phantom eats it (phantoms compete with player for food)
+                        console.log(`[Phantom] Ate food at index ${phantomFoodIndex}, position: (${this.world.foodPositions[phantomFoodIndex].x}, ${this.world.foodPositions[phantomFoodIndex].y}, ${this.world.foodPositions[phantomFoodIndex].z})`);
                         this.world.respawnFood(this.snake.segments, phantomFoodIndex);
+                        console.log(`[Phantom] Food respawned to: (${this.world.foodPositions[phantomFoodIndex].x}, ${this.world.foodPositions[phantomFoodIndex].y}, ${this.world.foodPositions[phantomFoodIndex].z})`);
                     }
                 }
             }
@@ -536,11 +538,9 @@ export class Game {
             return;
         }
 
-        // Check collision with phantom bodies
+        // Check collision with phantom bodies (dead phantoms still block the player)
         for (const phantom of this.phantoms) {
-            if (phantom.isDeadNow()) continue;
-
-            // Player head vs Phantom body
+            // Player head vs Phantom body (including dead phantoms - they remain obstacles)
             for (const segment of phantom.segments) {
                 if (head.distanceToSquared(segment) < 0.1) {
                     console.log("Game Over: Phantom collision");
@@ -549,6 +549,9 @@ export class Game {
                     return;
                 }
             }
+
+            // Skip further checks for dead phantoms (they can't move or die again)
+            if (phantom.isDeadNow()) continue;
 
             // Phantom head vs Player body (phantom dies)
             const phantomHead = phantom.getHead();
@@ -754,7 +757,7 @@ export class Game {
             let phantomInstanceIndex = 0;
 
             for (const phantom of this.phantoms) {
-                if (phantom.isDeadNow()) continue;
+                // Dead phantoms stay visible on the field (they just stop moving)
 
                 for (let i = 0; i < phantom.segments.length; i++) {
                     const segment = phantom.segments[i];

@@ -42,9 +42,14 @@ export class ReplayRecorder {
     /**
      * Начать запись
      */
-    public start(initialDirection: THREE.Vector3): void {
+    public start(initialDirection: THREE.Vector3, startPosition: THREE.Vector3): void {
         this.trajectoryLog = [];
         this.lastDirection.copy(initialDirection);
+
+        // Сохраняем точные параметры старта
+        this.startParams.startDirection = toVec3(initialDirection);
+        this.startParams.startPosition = toVec3(startPosition);
+
         this.isRecording = true;
         console.log('[ReplayRecorder] Recording started');
     }

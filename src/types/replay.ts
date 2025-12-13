@@ -23,6 +23,8 @@ export interface StartParams {
     seed: number;
     spawnIndex: number;
     initialSpeed: number;  // Начальная скорость (SPM - steps per minute)
+    startPosition?: Vec3;  // Точная начальная позиция (для совместимости с изменениями карты)
+    startDirection?: Vec3; // Точное начальное направление
 }
 
 // Полные данные реплея

@@ -10,7 +10,7 @@
  */
 
 import * as THREE from 'three';
-import { ReplayPlayer } from '../core/ReplaySystem';
+import { ReplayPlayer, fromVec3 } from '../core/ReplaySystem';
 import type { ReplayData } from '../types/replay';
 import { getSpawnPoint, SPAWN_POINTS } from './SpawnPoints';
 
@@ -60,25 +60,48 @@ export class Phantom {
      * Сбросить состояние фантома
      */
     public reset(): void {
-        const spawnIndex = this.replayPlayer.startParams.spawnIndex % SPAWN_POINTS.length;
-        const spawn = getSpawnPoint(spawnIndex);
+        const params = this.replayPlayer.startParams;
 
-        this.direction.copy(spawn.direction);
+        let position: THREE.Vector3;
+        let directionQuat: THREE.Quaternion;
+        let moveDir: THREE.Vector3;
 
-        // Вычисляем начальный вектор направления движения
-        this.moveDirection.set(0, 0, -1).applyQuaternion(this.direction);
-        this.snapDirectionToGrid(this.moveDirection);
+        if (params.startPosition && params.startDirection) {
+            // Use recorded start parameters if available (prevents desync on map changes)
+            position = fromVec3(params.startPosition);
+            moveDir = fromVec3(params.startDirection);
 
-        // Устанавливаем начальное направление в ReplayPlayer
+            // Reconstruct quaternion from look direction (approximate but enough for visuals)
+            // Or just rely on moveDirection which is the primary driver
+            const tempDir = moveDir.clone().negate(); // Forward is -Z relative to model
+            const up = new THREE.Vector3(0, 1, 0);
+            const matrix = new THREE.Matrix4();
+            matrix.lookAt(new THREE.Vector3(0, 0, 0), tempDir, up);
+            directionQuat = new THREE.Quaternion().setFromRotationMatrix(matrix);
+        } else {
+            // Fallback to legacy spawn index system
+            const spawnIndex = params.spawnIndex % SPAWN_POINTS.length;
+            const spawn = getSpawnPoint(spawnIndex);
+            position = spawn.position.clone();
+            directionQuat = spawn.direction.clone();
+
+            moveDir = new THREE.Vector3(0, 0, -1).applyQuaternion(directionQuat);
+            this.snapDirectionToGrid(moveDir);
+        }
+
+        this.direction.copy(directionQuat);
+        this.moveDirection.copy(moveDir);
+
+        // Ensure replay player knows the correct initial direction
         this.replayPlayer.setInitialDirection(this.moveDirection);
 
         // Вычисляем вектор "назад" для размещения хвоста
         const backVector = this.moveDirection.clone().negate();
 
         this.segments = [];
-        this.segments.push(spawn.position.clone());
-        this.segments.push(spawn.position.clone().add(backVector.clone()));
-        this.segments.push(spawn.position.clone().add(backVector.clone().multiplyScalar(2)));
+        this.segments.push(position.clone());
+        this.segments.push(position.clone().add(backVector.clone()));
+        this.segments.push(position.clone().add(backVector.clone().multiplyScalar(2)));
 
         this.accumulatedTime = 0;
         this.growthPending = 0;
