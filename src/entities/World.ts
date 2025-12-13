@@ -9,6 +9,19 @@ export const FOOD_COLORS = {
 
 export const WORLD_SIZE = 50;
 
+/**
+ * Seeded random number generator (Mulberry32)
+ * Используется для детерминированной генерации еды
+ */
+function mulberry32(seed: number): () => number {
+    return function () {
+        let t = seed += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+}
+
 export class World {
     public readonly size: number;
     public foodPositions: THREE.Vector3[] = [];
@@ -16,8 +29,29 @@ export class World {
     public foodSounds: number[] = [];
     public readonly FOOD_COUNT = 200;
 
-    constructor(size: number = WORLD_SIZE) {
+    private seed: number;
+    private random: () => number;
+
+    constructor(size: number = WORLD_SIZE, seed?: number) {
         this.size = size;
+        this.seed = seed ?? Math.floor(Math.random() * 1000000);
+        this.random = mulberry32(this.seed);
+        this.respawnFood([]);
+    }
+
+    /**
+     * Получить текущий seed
+     */
+    public getSeed(): number {
+        return this.seed;
+    }
+
+    /**
+     * Установить новый seed и пересоздать еду
+     */
+    public setSeed(seed: number): void {
+        this.seed = seed;
+        this.random = mulberry32(seed);
         this.respawnFood([]);
     }
 
@@ -49,11 +83,15 @@ export class World {
         return -1;
     }
 
-    public respawnFood(snakeSegments: THREE.Vector3[], index: number = -1) {
+    public respawnFood(snakeSegments: THREE.Vector3[], index: number = -1, useSeeded: boolean = true) {
+        // Для начальной генерации используем seeded random,
+        // для респавна одиночной еды используем Math.random (не влияет на синхронизацию)
+        const rng = useSeeded ? this.random : Math.random;
+
         const generatePos = () => {
-            const x = Math.floor(Math.random() * (this.size + 1));
-            const y = Math.floor(Math.random() * (this.size + 1));
-            const z = Math.floor(Math.random() * (this.size + 1));
+            const x = Math.floor(rng() * (this.size + 1));
+            const y = Math.floor(rng() * (this.size + 1));
+            const z = Math.floor(rng() * (this.size + 1));
             return new THREE.Vector3(x, y, z);
         };
 
@@ -72,7 +110,7 @@ export class World {
                 if (!overlapSnake && !overlapFood) {
                     this.foodPositions[idx] = newPos;
                     // Select random food type
-                    const rand = Math.random();
+                    const rand = rng();
                     if (rand < 0.50) {
                         this.foodColors[idx].setHex(FOOD_COLORS.BLUE); // 50%
                         this.foodSounds[idx] = 2; // hum1
@@ -91,7 +129,8 @@ export class World {
         };
 
         if (index === -1) {
-            // Initialize all
+            // Initialize all - всегда используем seeded для начальной генерации
+            this.random = mulberry32(this.seed); // Reset random state
             this.foodPositions = new Array(this.FOOD_COUNT).fill(null).map(() => new THREE.Vector3(0, 0, 0));
             this.foodColors = new Array(this.FOOD_COUNT).fill(null).map(() => new THREE.Color());
             this.foodSounds = new Array(this.FOOD_COUNT).fill(0);
@@ -99,9 +138,13 @@ export class World {
                 respawnSingle(i);
             }
         } else {
-            // Respawn specific
+            // Respawn specific - используем Math.random для респавна одной еды
             if (index >= 0 && index < this.foodPositions.length) {
+                // Временно переключаемся на Math.random для единичного респавна
+                const originalRng = this.random;
+                this.random = Math.random as () => number;
                 respawnSingle(index);
+                this.random = originalRng;
             }
         }
     }

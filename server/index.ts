@@ -4,6 +4,8 @@ import { Server as SocketServer } from 'socket.io';
 import { AuthManager } from './auth.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getRoomData, processGameOver, generateRandomSeed } from './room/RoomService.js';
+import type { GameOverPayload } from './room/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -125,6 +127,45 @@ io.on('connection', (socket) => {
     // Пинг для проверки соединения
     socket.on('ping', () => {
         socket.emit('pong', { serverTime: Date.now() });
+    });
+
+    // =====================================================
+    // ROOM / PHANTOM SYSTEM
+    // =====================================================
+
+    // Клиент запрашивает вход в комнату (получение фантомов)
+    socket.on('room:join', async (seed: number | null) => {
+        try {
+            // Если seed не указан, генерируем случайный
+            const roomSeed = seed ?? generateRandomSeed();
+
+            console.log(`[Room] Client ${socket.id} joining room with seed: ${roomSeed}`);
+
+            const roomData = await getRoomData(roomSeed);
+
+            socket.emit('room:data', roomData);
+            console.log(`[Room] Sent ${roomData.phantoms.length} phantoms to client ${socket.id}`);
+        } catch (error) {
+            console.error(`[Room] Error joining room:`, error);
+            socket.emit('room:error', { message: 'Failed to join room' });
+        }
+    });
+
+    // Клиент завершил игру — отправляет свой реплей
+    socket.on('game:over', async (payload: GameOverPayload) => {
+        try {
+            const playerId = socket.data.token || socket.id;
+
+            console.log(`[Game] Client ${socket.id} finished game. Score: ${payload.replay?.finalScore}`);
+
+            const result = await processGameOver(playerId, payload);
+
+            socket.emit('game:result', result);
+            console.log(`[Game] Result for ${socket.id}: ${result.message}`);
+        } catch (error) {
+            console.error(`[Game] Error processing game over:`, error);
+            socket.emit('game:result', { saved: false, message: 'Server error' });
+        }
     });
 
     socket.on('disconnect', (reason) => {

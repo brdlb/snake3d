@@ -3,6 +3,7 @@ import { Loop } from './Loop';
 import { InputManager } from './Input';
 import { Snake } from '../entities/Snake';
 import { World, FOOD_COLORS, WORLD_SIZE } from '../entities/World';
+import { Phantom } from '../entities/Phantom';
 import { ParticleSystem } from '../graphics/ParticleSystem';
 
 import { SettingsManager } from './SettingsManager';
@@ -14,6 +15,9 @@ import { GameOverUI } from '../ui/GameOverUI';
 import { GameHUD } from '../ui/GameHUD';
 import { WelcomeScreen } from '../ui/WelcomeScreen';
 import { SoundManager } from '../audio/SoundManager';
+import { ReplayRecorder } from './ReplaySystem';
+import { NetworkManager } from '../network/NetworkManager';
+import type { ReplayData, RoomData, InputDirection } from '../types/replay';
 
 interface Pulse {
     color: THREE.Color;
@@ -62,6 +66,13 @@ export class Game {
     private isWaitingForStart: boolean = true;
 
     private _visibilityHandler: () => void;
+
+    // Async Multiplayer: Phantoms & Replay
+    private phantoms: Phantom[] = [];
+    private phantomMesh: THREE.InstancedMesh | null = null;
+    private replayRecorder: ReplayRecorder | null = null;
+    private networkManager: NetworkManager;
+    private currentSeed: number = 0;
 
     constructor() {
         // 1. Managers Setup
@@ -155,6 +166,32 @@ export class Game {
         // Pathfinder
         this.pathfinder = new Pathfinder(this.sceneManager.scene, this.world);
 
+        // Phantom Mesh (ghostly appearance)
+        const phantomMaterial = new THREE.MeshBasicMaterial({
+            color: 0x88ffff,
+            map: texture,
+            transparent: true,
+            opacity: 0.5
+        });
+        const phantomGeo = new THREE.BoxGeometry(0.85, 0.85, 0.85);
+        this.phantomMesh = new THREE.InstancedMesh(phantomGeo, phantomMaterial, 10000);
+        this.phantomMesh.count = 0;
+        this.phantomMesh.frustumCulled = false;
+        this.sceneManager.scene.add(this.phantomMesh);
+
+        // Network Manager
+        this.networkManager = NetworkManager.getInstance();
+
+        // Listen for room data (phantoms)
+        this.networkManager.on('room:data', (data: RoomData) => {
+            console.log(`[Game] Received room data: seed=${data.seed}, phantoms=${data.phantoms.length}`);
+            this.initializeRoom(data);
+        });
+
+        this.networkManager.on('game:result', (result: { saved: boolean; message: string }) => {
+            console.log(`[Game] Game result: ${result.message}`);
+        });
+
         // Visibility Handler to stop loop when tab is hidden
         this._visibilityHandler = () => {
             if (document.hidden) {
@@ -178,18 +215,43 @@ export class Game {
     }
 
     private setupInputs() {
-        const handleTurn = (action: () => void) => {
+        const handleTurn = (action: () => void, inputDir: InputDirection) => {
             const prevDir = this.snake.direction.clone();
             action();
             if (!this.snake.direction.equals(prevDir)) {
                 this.pathfinder.updatePathVisualization(this.snake.getHead(), this.snake.segments, this.snake.direction);
+                // Записываем ввод для реплея
+                if (this.replayRecorder) {
+                    this.replayRecorder.recordInput(inputDir);
+                }
             }
         };
 
-        this.input.on('left', () => handleTurn(() => this.snake.rotate(Math.PI / 2)));
-        this.input.on('right', () => handleTurn(() => this.snake.rotate(-Math.PI / 2)));
-        this.input.on('rollLeft', () => handleTurn(() => this.snake.roll(-Math.PI / 2)));
-        this.input.on('rollRight', () => handleTurn(() => this.snake.roll(Math.PI / 2)));
+        this.input.on('left', () => handleTurn(() => this.snake.rotate(Math.PI / 2), 'TURN_LEFT'));
+        this.input.on('right', () => handleTurn(() => this.snake.rotate(-Math.PI / 2), 'TURN_RIGHT'));
+        this.input.on('rollLeft', () => handleTurn(() => this.snake.roll(-Math.PI / 2), 'ROLL_LEFT'));
+        this.input.on('rollRight', () => handleTurn(() => this.snake.roll(Math.PI / 2), 'ROLL_RIGHT'));
+    }
+
+    /**
+     * Инициализация комнаты с фантомами
+     */
+    private initializeRoom(data: RoomData): void {
+        this.currentSeed = data.seed;
+
+        // Обновляем seed в мире для детерминированной генерации еды
+        this.world.setSeed(data.seed);
+
+        // Создаём фантомов из данных реплеев
+        this.phantoms = data.phantoms.map((replayData: ReplayData, index: number) => {
+            return new Phantom(replayData, index);
+        });
+
+        console.log(`[Game] Initialized room with seed ${data.seed} and ${this.phantoms.length} phantoms`);
+
+        // Инициализируем запись реплея
+        this.replayRecorder = new ReplayRecorder(data.seed, 0);
+        this.replayRecorder.start();
     }
 
     /**
@@ -199,6 +261,15 @@ export class Game {
     private async handleGameStart(): Promise<void> {
         // Инициализируем AudioContext по клику пользователя
         await this.soundManager.initAudio();
+
+        // Запрашиваем комнату с сервера (null = случайный seed)
+        if (this.networkManager.isConnected()) {
+            this.networkManager.send('room:join', null);
+        } else {
+            // Оффлайн режим — генерируем локальный seed
+            const localSeed = Math.floor(Math.random() * 1000000);
+            this.initializeRoom({ seed: localSeed, phantoms: [] });
+        }
 
         // Снимаем флаг ожидания старта
         this.isWaitingForStart = false;
@@ -279,6 +350,28 @@ export class Game {
             if (rate > 4.0) rate = 4.0;
 
             this.soundManager.playStep(rate);
+
+            // Tick replay recorder
+            if (this.replayRecorder) {
+                this.replayRecorder.tick();
+            }
+
+            // Update phantoms
+            for (const phantom of this.phantoms) {
+                if (!phantom.isDeadNow()) {
+                    phantom.setSpeed(60 / this.currentSPM);
+                    phantom.update(delta);
+
+                    // Check if phantom eats food (they grow too!)
+                    const phantomHead = phantom.getHead();
+                    const phantomFoodIndex = this.world.checkFoodCollision(phantomHead);
+                    if (phantomFoodIndex !== -1) {
+                        phantom.grow();
+                        // Don't respawn food for phantoms - they eat the same seeded food
+                    }
+                }
+            }
+
             this.checkCollisions();
 
             // Update Pathfinder on Step
@@ -342,6 +435,47 @@ export class Game {
             this.particleSystem.emit(head, this.snake.direction, 50, snakeColor);
             this.handleGameOver();
             return;
+        }
+
+        // Check collision with phantom bodies
+        for (const phantom of this.phantoms) {
+            if (phantom.isDeadNow()) continue;
+
+            // Player head vs Phantom body
+            for (const segment of phantom.segments) {
+                if (head.distanceToSquared(segment) < 0.1) {
+                    console.log("Game Over: Phantom collision");
+                    this.particleSystem.emit(head, this.snake.direction, 50, phantom.phantomColor);
+                    this.handleGameOver();
+                    return;
+                }
+            }
+
+            // Phantom head vs Player body (phantom dies)
+            const phantomHead = phantom.getHead();
+            for (let i = 1; i < this.snake.segments.length; i++) {
+                if (phantomHead.distanceToSquared(this.snake.segments[i]) < 0.1) {
+                    console.log(`Phantom ${phantom.replayPlayer.replayId} died: hit player`);
+                    phantom.kill();
+                    this.particleSystem.emit(phantomHead, phantom.direction, 30, phantom.phantomColor);
+                    break;
+                }
+            }
+
+            // Phantom vs Phantom collisions
+            for (const otherPhantom of this.phantoms) {
+                if (otherPhantom === phantom || otherPhantom.isDeadNow() || phantom.isDeadNow()) continue;
+
+                const otherHead = otherPhantom.getHead();
+                for (const segment of phantom.segments) {
+                    if (otherHead.distanceToSquared(segment) < 0.1) {
+                        console.log(`Phantom ${otherPhantom.replayPlayer.replayId} died: hit another phantom`);
+                        otherPhantom.kill();
+                        this.particleSystem.emit(otherHead, otherPhantom.direction, 30, otherPhantom.phantomColor);
+                        break;
+                    }
+                }
+            }
         }
 
         const foodIndex = this.world.checkFoodCollision(head);
@@ -411,6 +545,21 @@ export class Game {
         this.soundManager.playGameOver();
         this.soundManager.setAmbientLowPass(true);
         this.gameOverUI.show();
+
+        // Stop replay recording and send to server
+        if (this.replayRecorder) {
+            this.replayRecorder.stop();
+
+            const replayData = this.replayRecorder.getReplayData(this.score);
+
+            if (this.networkManager.isConnected()) {
+                this.networkManager.send('game:over', {
+                    seed: this.currentSeed,
+                    replay: replayData
+                });
+                console.log(`[Game] Sent replay to server. Score: ${this.score}, Ticks: ${replayData.deathTick}`);
+            }
+        }
     }
 
     private resetGame() {
@@ -420,11 +569,22 @@ export class Game {
         this.currentSPM = 300;
         this.snake.reset(new THREE.Vector3(WORLD_SIZE / 2, WORLD_SIZE / 2, WORLD_SIZE / 2));
         this.snake.setSpeed(60 / this.currentSPM);
-        this.world.respawnFood([]);
         this.particleSystem.clear();
         this.pathfinder.clear();
         this.cameraController.reset();
         this.soundManager.setAmbientLowPass(false);
+
+        // Reset phantoms
+        this.phantoms = [];
+
+        // Request new room from server
+        if (this.networkManager.isConnected()) {
+            this.networkManager.send('room:join', null);
+        } else {
+            // Offline mode - generate new local seed
+            const localSeed = Math.floor(Math.random() * 1000000);
+            this.initializeRoom({ seed: localSeed, phantoms: [] });
+        }
     }
 
     private render() {
@@ -488,6 +648,38 @@ export class Game {
 
         this.snakeMesh.instanceMatrix.needsUpdate = true;
         if (this.snakeMesh.instanceColor) this.snakeMesh.instanceColor.needsUpdate = true;
+
+        // Render Phantoms
+        if (this.phantomMesh) {
+            let phantomInstanceIndex = 0;
+
+            for (const phantom of this.phantoms) {
+                if (phantom.isDeadNow()) continue;
+
+                for (let i = 0; i < phantom.segments.length; i++) {
+                    const segment = phantom.segments[i];
+
+                    this.dummy.position.copy(segment);
+                    this.dummy.rotation.set(0, 0, 0);
+
+                    if (i === 0) {
+                        // Phantom head
+                        this.dummy.quaternion.copy(phantom.direction);
+                    }
+
+                    this.dummy.scale.set(1, 1, 1);
+                    this.dummy.updateMatrix();
+
+                    this.phantomMesh.setMatrixAt(phantomInstanceIndex, this.dummy.matrix);
+                    this.phantomMesh.setColorAt(phantomInstanceIndex, phantom.phantomColor);
+                    phantomInstanceIndex++;
+                }
+            }
+
+            this.phantomMesh.count = phantomInstanceIndex;
+            this.phantomMesh.instanceMatrix.needsUpdate = true;
+            if (this.phantomMesh.instanceColor) this.phantomMesh.instanceColor.needsUpdate = true;
+        }
 
         this.postProcess.render();
     }

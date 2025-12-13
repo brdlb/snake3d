@@ -174,6 +174,22 @@ export class NetworkManager {
                 const latency = Date.now() - (data.sentAt || Date.now());
                 this.emit('latencyUpdate', latency);
             });
+
+            // Room/Phantom system events
+            this.socket.on('room:data', (data: any) => {
+                console.log('[Network] Received room:data');
+                this.emit('room:data', data);
+            });
+
+            this.socket.on('room:error', (error: { message: string }) => {
+                console.error('[Network] Room error:', error);
+                this.emit('room:error', error);
+            });
+
+            this.socket.on('game:result', (result: { saved: boolean; message: string }) => {
+                console.log('[Network] Received game:result:', result);
+                this.emit('game:result', result);
+            });
         });
     }
 
