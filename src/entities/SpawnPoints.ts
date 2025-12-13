@@ -23,21 +23,22 @@ const OFFSET = 5;
  */
 export const SPAWN_POINTS: SpawnPoint[] = [
     // Нижний уровень (y = OFFSET)
+    // Направления инвертированы, чтобы игрок двигался ОТ ближайших стен к центру
     {
         position: new THREE.Vector3(OFFSET, OFFSET, OFFSET),
-        direction: new THREE.Quaternion() // Смотрит вперёд (-Z)
+        direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI) // Смотрит назад (+Z) - от стены Z=0
     },
     {
         position: new THREE.Vector3(WORLD_SIZE - OFFSET, OFFSET, OFFSET),
-        direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI) // Смотрит назад (+Z)
+        direction: new THREE.Quaternion() // Смотрит вперёд (-Z) - от стены Z=0, но к центру по X
     },
     {
         position: new THREE.Vector3(OFFSET, OFFSET, WORLD_SIZE - OFFSET),
-        direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2) // Смотрит вправо (+X)
+        direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2) // Смотрит влево (-X) - от стены Z=max к центру
     },
     {
         position: new THREE.Vector3(WORLD_SIZE - OFFSET, OFFSET, WORLD_SIZE - OFFSET),
-        direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2) // Смотрит влево (-X)
+        direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2) // Смотрит вправо (+X) - от стены Z=max к центру... нет, влево (-X)
     },
 ];
 
