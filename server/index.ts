@@ -4,7 +4,7 @@ import { Server as SocketServer } from 'socket.io';
 import { AuthManager } from './auth.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getRoomData, processGameOver, findRoomForPlayer } from './room/RoomService.js';
+import { getRoomData, processGameOver, findRoomForPlayer, logRoomsSummary } from './room/RoomService.js';
 import type { GameOverPayload } from './room/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -135,6 +135,9 @@ io.on('connection', (socket) => {
 
     // Клиент запрашивает вход в комнату (получение фантомов)
     socket.on('room:join', async (requestedSeed: number | null) => {
+        // Выводим сводку по комнатам при каждом запросе
+        await logRoomsSummary();
+
         try {
             const playerId = socket.data.token || socket.id;
             let roomData;

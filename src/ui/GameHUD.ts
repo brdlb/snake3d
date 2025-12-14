@@ -81,5 +81,62 @@ export class GameHUD {
 
     public dispose() {
         this.container.remove();
+        const btn = document.querySelector('.hud-pause-btn');
+        if (btn) btn.remove();
+    }
+
+    public addPauseButton(callback: () => void) {
+        const btn = document.createElement('button');
+        btn.className = 'hud-pause-btn';
+        btn.innerHTML = '||';
+        btn.onclick = (e) => {
+            e.stopPropagation(); // Prevent focus stealing issues if any
+            callback();
+        };
+
+        document.body.appendChild(btn);
+
+        const style = document.createElement('style');
+        style.textContent = `
+            .hud-pause-btn {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                width: 44px;
+                height: 44px;
+                background: #000000;
+                border: none;
+                border-radius: 0;
+                color: #fff;
+                font-family: 'Consolas', monospace;
+                font-weight: bold;
+                font-size: 18px;
+                cursor: pointer;
+                z-index: 9999;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: all 0.2s ease;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            }
+
+            .hud-pause-btn:hover {
+                background: #1a1a1a;
+                transform: translateY(-2px);
+                box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+            }
+
+            .hud-pause-btn:active {
+                background: #0f0f0f;
+                transform: translateY(0);
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    public togglePauseButton(visible: boolean) {
+        const btn = document.querySelector('.hud-pause-btn') as HTMLElement;
+        if (btn) {
+            btn.style.display = visible ? 'flex' : 'none';
+        }
     }
 }

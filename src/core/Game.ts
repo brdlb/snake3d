@@ -11,14 +11,15 @@ import { SettingsManager } from './SettingsManager';
 import { SceneManager } from '../graphics/SceneManager';
 import { CameraController } from './CameraController';
 import { PostProcessManager } from '../graphics/PostProcessManager';
-import { DebugUI } from '../ui/DebugUI';
+import { SettingsUI } from '../ui/SettingsUI';
 import { GameOverUI } from '../ui/GameOverUI';
 import { GameHUD } from '../ui/GameHUD';
 import { WelcomeScreen } from '../ui/WelcomeScreen';
 import { SoundManager } from '../audio/SoundManager';
 import { ReplayRecorder } from './ReplaySystem';
 import { NetworkManager } from '../network/NetworkManager';
-import { NetworkStatusUI } from '../network/NetworkStatusUI';
+// import { NetworkStatusUI } from '../network/NetworkStatusUI';
+import { PauseUI, GameStats } from '../ui/PauseUI';
 import type { ReplayData, RoomData } from '../types/replay';
 
 interface Pulse {
@@ -35,8 +36,9 @@ export class Game {
     private sceneManager: SceneManager;
     private cameraController: CameraController;
     private postProcess: PostProcessManager;
-    private debugUI: DebugUI;
+    private settingsUI: SettingsUI;
     private gameOverUI: GameOverUI;
+    private pauseUI: PauseUI;
     private hud: GameHUD;
     private welcomeScreen: WelcomeScreen;
     private soundManager: SoundManager;
@@ -74,8 +76,21 @@ export class Game {
     private phantomMesh: THREE.InstancedMesh | null = null;
     private replayRecorder: ReplayRecorder | null = null;
     private networkManager: NetworkManager;
-    private networkStatusUI: NetworkStatusUI;
+    // private networkStatusUI: NetworkStatusUI;
     private currentSeed: number = 0;
+
+    // Pause & Stats
+    private isPaused: boolean = false;
+    private gameStats: GameStats = {
+        time: 0,
+        distance: 0,
+        avgSpeed: 0,
+        foodCount: { green: 0, blue: 0, pink: 0, total: 0 }
+    };
+    // Accumulator for average speed calculation (sum of speeds per frame / frames)
+    // Or better: integrate speed over time.
+    private totalSpeedAccumulator: number = 0;
+    private speedSamples: number = 0;
     private playerSpawnIndex: number = 0;
 
     constructor() {
@@ -96,14 +111,35 @@ export class Game {
             this.settingsManager.bloomConfig
         );
 
-        // Debug UI
-        this.debugUI = new DebugUI(this.settingsManager, () => {
-            this.cameraController.updateConfig(this.settingsManager.cameraConfig);
-            this.postProcess.updateBloomConfig(this.settingsManager.bloomConfig);
-        });
+        // Settings UI
+        this.settingsUI = new SettingsUI(
+            this.settingsManager,
+            () => {
+                this.cameraController.updateConfig(this.settingsManager.cameraConfig);
+                this.postProcess.updateBloomConfig(this.settingsManager.bloomConfig);
+            },
+            () => { // On Close Callback
+                this.settingsUI.hide();
+                this.hud.togglePauseButton(true);
+                this.pauseUI.show();
+            }
+        );
 
         this.gameOverUI = new GameOverUI(() => this.resetGame());
         this.hud = new GameHUD();
+
+        this.pauseUI = new PauseUI(
+            () => this.togglePause(),
+            () => {
+                // When opening settings:
+                this.pauseUI.hide(); // Hide Pause UI
+                this.hud.togglePauseButton(false); // Hide Pause Button
+                this.settingsUI.show(); // Show Settings
+            }
+        );
+
+        // Add Pause Button to HUD
+        this.hud.addPauseButton(() => this.togglePause());
 
 
 
@@ -190,8 +226,8 @@ export class Game {
         // Network Manager
         this.networkManager = NetworkManager.getInstance();
 
-        // Network Status UI (показывает seed комнаты)
-        this.networkStatusUI = new NetworkStatusUI();
+        // Network Status UI removed in favor of Pause Button
+        // this.networkStatusUI = new NetworkStatusUI();
 
         // Listen for room data (phantoms)
         this.networkManager.on('room:data', (data: RoomData) => {
@@ -248,6 +284,7 @@ export class Game {
         this.input.on('right', () => handleTurn(() => this.snake.rotate(-Math.PI / 2)));
         this.input.on('rollLeft', () => handleTurn(() => this.snake.roll(-Math.PI / 2)));
         this.input.on('rollRight', () => handleTurn(() => this.snake.roll(Math.PI / 2)));
+        this.input.on('pause', () => this.togglePause()); // Escape key
     }
 
     /**
@@ -257,7 +294,7 @@ export class Game {
         this.currentSeed = data.seed;
 
         // Обновляем UI с seed комнаты
-        this.networkStatusUI.setSeed(data.seed);
+        // this.networkStatusUI.setSeed(data.seed);
 
         // Обновляем seed в мире для детерминированной генерации еды
         this.world.setSeed(data.seed);
@@ -328,8 +365,10 @@ export class Game {
 
         // Dispose Managers
         this.sceneManager.dispose();
-        this.debugUI.dispose();
+        this.settingsUI.dispose();
         this.gameOverUI.dispose();
+        this.gameOverUI.dispose();
+        this.pauseUI.dispose();
         this.hud.dispose();
         if (this.welcomeScreen) this.welcomeScreen.dispose();
 
@@ -342,6 +381,24 @@ export class Game {
         // @ts-ignore
         if (this.snakeMesh.material.dispose) this.snakeMesh.material.dispose();
         if (this.foodMaterial.dispose) this.foodMaterial.dispose();
+    }
+
+    private togglePause() {
+        if (this.isGameOver || this.isWaitingForStart) return;
+
+        this.isPaused = !this.isPaused;
+
+        if (this.isPaused) {
+            this.pauseUI.updateStats(this.gameStats);
+            this.pauseUI.show();
+            this.cameraController.setOrbitMode();
+            this.soundManager.setAmbientLowPass(true);
+        } else {
+            this.pauseUI.hide();
+            this.settingsUI.hide(); // Hide settings if they were open
+            this.cameraController.stopOrbitMode();
+            this.soundManager.setAmbientLowPass(false);
+        }
     }
 
     private isGameOver: boolean = false;
@@ -370,6 +427,20 @@ export class Game {
             return;
         }
 
+        if (this.isPaused) {
+            const head = this.snake.getHead();
+            this.cameraController.update(delta, head, this.snake.direction, 0);
+            return;
+        }
+
+        // Stats Update
+        this.gameStats.time += delta;
+        this.totalSpeedAccumulator += this.currentSPM * delta;
+        this.speedSamples += delta;
+        if (this.speedSamples > 0) {
+            this.gameStats.avgSpeed = this.totalSpeedAccumulator / this.speedSamples;
+        }
+
         // Boost
         if (this.input.isActionPressed('boost')) {
             this.snake.setSpeed(0.05);
@@ -382,6 +453,10 @@ export class Game {
             // Step occurred - выводим координаты и направление
             const stepHead = this.snake.getHead();
             const stepDir = new THREE.Vector3(0, 0, 1).applyQuaternion(this.snake.direction);
+
+            // Stats: Distance (1 unit per step roughly, grid based)
+            this.gameStats.distance += 1;
+
             console.log(`[Step] Position: (${stepHead.x}, ${stepHead.y}, ${stepHead.z}) Direction: (${stepDir.x.toFixed(2)}, ${stepDir.y.toFixed(2)}, ${stepDir.z.toFixed(2)})`);
 
             // Calculate pitch based on speed (normalize around 300 SPM)
@@ -451,15 +526,15 @@ export class Game {
 
         const head = this.snake.getHead();
 
-        // Update Debug UI
+        // Update Settings UI (FPS etc)
         this.frames++;
         this.fpsTime += delta;
         if (this.fpsTime >= 0.5) {
-            this.debugUI.updateFPS(this.frames / this.fpsTime);
+            this.settingsUI.updateFPS(this.frames / this.fpsTime);
             this.frames = 0;
             this.fpsTime = 0;
         }
-        this.debugUI.updateInfo(`Head: x:${Math.round(head.x)} y:${Math.round(head.y)} z:${Math.round(head.z)}`);
+        this.settingsUI.updateInfo(`Head: x:${Math.round(head.x)} y:${Math.round(head.y)} z:${Math.round(head.z)}`);
 
         // Manual Camera Control
         if (this.input.isLeftMouseDown) {
@@ -595,19 +670,23 @@ export class Game {
                 spmChange = 50;
                 growAmount = 3;
                 scorePoints = 5;
+                this.gameStats.foodCount.green++;
             }
             // Blue: +10 SPM, +5 Len, +5 Score
             else if (hex === FOOD_COLORS.BLUE) {
                 spmChange = 10;
                 growAmount = 5;
                 scorePoints = 15;
+                this.gameStats.foodCount.blue++;
             }
             // Pink: -10 SPM, +1 Len, +1 Score
             else if (hex === FOOD_COLORS.PINK) {
                 spmChange = -10;
                 growAmount = 3;
                 scorePoints = 3;
+                this.gameStats.foodCount.pink++;
             }
+            this.gameStats.foodCount.total++;
             for (let i = 0; i < growAmount; i++) {
                 this.snake.grow();
             }
@@ -642,7 +721,7 @@ export class Game {
     private handleGameOver() {
         this.isGameOver = true;
         this.cameraController.triggerShake(0.2, 0.2);
-        this.cameraController.setGameOverMode();
+        this.cameraController.setOrbitMode(); // Replaces setGameOverMode
         this.particleSystem.stopTime();
         this.soundManager.playGameOver();
         this.soundManager.setAmbientLowPass(true);
@@ -667,7 +746,20 @@ export class Game {
 
     private resetGame() {
         this.gameOverUI.hide();
+        this.pauseUI.hide();
         this.isGameOver = false;
+        this.isPaused = false;
+
+        // Reset Stats
+        this.gameStats = {
+            time: 0,
+            distance: 0,
+            avgSpeed: 0,
+            foodCount: { green: 0, blue: 0, pink: 0, total: 0 }
+        };
+        this.totalSpeedAccumulator = 0;
+        this.speedSamples = 0;
+
         this.score = 0;
         this.currentSPM = 300;
         this.snake.setSpeed(60 / this.currentSPM);

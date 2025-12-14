@@ -1,4 +1,4 @@
-type KeyAction = 'left' | 'right' | 'rollLeft' | 'rollRight' | 'boost';
+type KeyAction = 'left' | 'right' | 'rollLeft' | 'rollRight' | 'boost' | 'pause';
 
 export class InputManager {
     private keys: Map<string, boolean> = new Map();
@@ -7,7 +7,8 @@ export class InputManager {
         'KeyD': 'right',
         'KeyQ': 'rollLeft',
         'KeyE': 'rollRight',
-        'Space': 'boost'
+        'Space': 'boost',
+        'Escape': 'pause'
     };
 
     private actionCallbacks: Map<KeyAction, Set<() => void>> = new Map();

@@ -6,6 +6,7 @@ import {
     getActiveReplays,
     addReplayToRoom,
     getAllRoomSeeds,
+    getRoomMeta,
     hasPlayerPlayedInRoom,
     assignSpawnIndex
 } from './RoomRepository.js';
@@ -132,4 +133,28 @@ export async function processGameOver(playerId: string, payload: GameOverPayload
  */
 export function generateRandomSeed(): number {
     return Math.floor(Math.random() * 1000000);
+}
+
+/**
+ * Вывести сводную информацию о всех комнатах
+ */
+export async function logRoomsSummary(): Promise<void> {
+    const seeds = await getAllRoomSeeds();
+
+    console.log('\n╔════════════ ROOMS SUMMARY ════════════╗');
+    console.log('║  Seed  │ Phantoms │ Total Games Played ║');
+    console.log('╟────────┼──────────┼────────────────────╢');
+
+    if (seeds.length === 0) {
+        console.log('║        │ NO ROOMS │                    ║');
+    } else {
+        for (const seed of seeds) {
+            const meta = await getRoomMeta(seed);
+            const seedPad = seed.substring(0, 6).padEnd(6, ' ');
+            const phantomsPad = meta.active_phantoms.length.toString().padEnd(8, ' ');
+            const totalPad = meta.total_games_played.toString().padEnd(18, ' ');
+            console.log(`║ ${seedPad} │ ${phantomsPad} │ ${totalPad} ║`);
+        }
+    }
+    console.log('╚═══════════════════════════════════════╝\n');
 }

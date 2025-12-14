@@ -51,13 +51,13 @@ export class CameraController {
         this.manualYaw = 0;
         this.manualPitch = 0;
         this.isManualActive = false;
-        this.isGameOver = false;
-        this.gameOverTime = 0;
+        this.isOrbiting = false;
+        this.orbitTime = 0;
     }
 
     public update(delta: number, targetPos: THREE.Vector3, targetDir: THREE.Quaternion, progress: number) {
-        if (this.isGameOver) {
-            this.updateGameOver(delta);
+        if (this.isOrbiting) {
+            this.updateOrbit(delta);
             return;
         }
 
@@ -126,15 +126,21 @@ export class CameraController {
         }
     }
 
-    // Game Over State
-    private isGameOver: boolean = false;
-    private gameOverTime: number = 0;
-    private gameOverBaseQuat: THREE.Quaternion = new THREE.Quaternion();
+    // Orbit/Pause/GameOver State
+    private isOrbiting: boolean = false;
+    private orbitTime: number = 0;
+    private orbitBaseQuat: THREE.Quaternion = new THREE.Quaternion();
 
-    public setGameOverMode() {
-        this.isGameOver = true;
-        this.gameOverTime = 0;
-        this.gameOverBaseQuat.copy(this.cameraRig.quaternion);
+    public setOrbitMode() {
+        this.isOrbiting = true;
+        this.orbitTime = 0;
+        this.orbitBaseQuat.copy(this.cameraRig.quaternion);
+    }
+
+    public stopOrbitMode() {
+        this.isOrbiting = false;
+        // Optional: Reset rig to smoothed rotation to avoid jump?
+        // The normal update loop will overwrite rig quaternion anyway.
     }
 
     public setManualControlActive(active: boolean) {
@@ -154,8 +160,8 @@ export class CameraController {
         this.manualYaw = THREE.MathUtils.clamp(this.manualYaw, -yawLimit, yawLimit);
     }
 
-    private updateGameOver(delta: number) {
-        this.gameOverTime += delta;
+    private updateOrbit(delta: number) {
+        this.orbitTime += delta;
 
         // Requirement:
         // Rotate 125 deg around UP
@@ -165,7 +171,7 @@ export class CameraController {
         const T_TRANSITION = 0.8; // Seconds to perform the initial swoop
         const SPIN_SPEED = 0.2; // Radians per second for continuous spin
 
-        let progress = Math.min(this.gameOverTime / T_TRANSITION, 1.0);
+        let progress = Math.min(this.orbitTime / T_TRANSITION, 1.0);
         // Ease out cubic
         progress = 1 - Math.pow(1 - progress, 3);
 
@@ -176,7 +182,7 @@ export class CameraController {
         // Calculate current offsets
         // Combine the "swoop" (ease-out) with the continuous spin (linear)
         // This ensures that when the swoop ends (velocity 0), the total velocity matches the spin speed
-        let currentYaw = (targetYaw * progress) + (this.gameOverTime * SPIN_SPEED);
+        let currentYaw = (targetYaw * progress) + (this.orbitTime * SPIN_SPEED);
 
         // Direction of movement is -Z. Local Up is Y.
         // Rotating around -Z (Direction) by 25 deg.
@@ -199,7 +205,7 @@ export class CameraController {
         // User said "around up vector of snake". Snake is aligned with Rig. So Rig Local Y.
         // "Around direction of movement". Rig Local -Z.
 
-        this.cameraRig.quaternion.copy(this.gameOverBaseQuat).multiply(qYaw).multiply(qRoll);
+        this.cameraRig.quaternion.copy(this.orbitBaseQuat).multiply(qYaw).multiply(qRoll);
 
         // Apply to Camera (update position based on rig)
         this.updateCameraFromRig(delta);
