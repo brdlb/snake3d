@@ -69,7 +69,11 @@ export class CameraController {
         this.cameraRig.position.lerp(this._tempVec2, delta * this.config.lerpSpeed);
 
         // Slerp the smoothed base quaternion towards target
-        this.smoothedRigQuaternion.slerp(targetDir, delta * this.config.lerpSpeed);
+        // Slerp the smoothed base quaternion towards target
+        // Если игрок управляет камерой, мы НЕ должны вращать базу (чтобы повороты змейки не сбивали камеру)
+        if (!this.isManualActive) {
+            this.smoothedRigQuaternion.slerp(targetDir, delta * this.config.lerpSpeed);
+        }
 
         // Apply Manual Control
         if (!this.isManualActive) {

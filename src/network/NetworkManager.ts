@@ -34,8 +34,14 @@ export class NetworkManager {
     private maxReconnectAttempts = 5;
 
     private readonly TOKEN_KEY = 'snake3d_auth_token';
-    private readonly SERVER_URL =
-        import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:3000';
+    private readonly SERVER_URL = this.normalizeUrl(
+        import.meta.env.VITE_SOCKET_SERVER_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:3055')
+    );
+
+    private normalizeUrl(url: string): string {
+        // Remove trailing /socket.io if present to avoid duplication
+        return url.replace(/\/socket\.io\/?$/, '');
+    }
 
     private constructor() {
         this.loadToken();
@@ -190,6 +196,16 @@ export class NetworkManager {
                 console.log('[Network] Received game:result:', result);
                 this.emit('game:result', result);
             });
+
+            this.socket.on('leaderboard:data', (data: any[]) => {
+                console.log('[Network] Received leaderboard data:', data.length, 'records');
+                this.emit('leaderboard:data', data);
+            });
+
+            this.socket.on('leaderboard:error', (error: { message: string }) => {
+                console.error('[Network] Leaderboard error:', error);
+                this.emit('leaderboard:error', error);
+            });
         });
     }
 
@@ -240,6 +256,18 @@ export class NetworkManager {
     public ping(): void {
         if (this.socket?.connected) {
             this.socket.emit('ping', { sentAt: Date.now() });
+        }
+    }
+
+    /**
+     * Запросить таблицу рекордов
+     */
+    public requestLeaderboard(): void {
+        if (this.socket?.connected) {
+            console.log('[Network] Requesting leaderboard...');
+            this.socket.emit('leaderboard:request');
+        } else {
+            console.warn('[Network] Cannot request leaderboard: not connected');
         }
     }
 

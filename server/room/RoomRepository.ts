@@ -19,8 +19,11 @@ const __dirname = path.dirname(__filename);
 // Базовая директория для данных (относительно корня проекта)
 const DATA_DIR = path.join(__dirname, '../../data/rooms');
 
-// Максимальное количество активных фантомов в комнате
-export const MAX_PHANTOMS = 4;
+// Максимальное количество активных фантомов в комнате (согласно новым правилам: 3)
+export const MAX_PHANTOMS = 3;
+
+// Количество точек спавна (всего 4)
+export const MAX_SPAWN_POINTS = 4;
 
 /**
  * Получить путь к директории комнаты
@@ -70,10 +73,12 @@ export async function getRoomMeta(seed: string): Promise<RoomMeta> {
     try {
         const data = await fs.readFile(metaPath, 'utf-8');
         const meta = JSON.parse(data) as RoomMeta;
+
         // Миграция: добавляем players_history если отсутствует
         if (!meta.players_history) {
             meta.players_history = [];
         }
+
         return meta;
     } catch {
         // Комната не существует — создаём пустую
@@ -137,9 +142,18 @@ export async function deleteReplay(seed: string, replayId: string): Promise<void
  */
 export async function getActiveReplays(seed: string): Promise<ReplayData[]> {
     const meta = await getRoomMeta(seed);
+    // При чтении реплеев также можно сделать lazy cleanup, 
+    // но лучше это делать в assignSpawnIndex, чтобы не замедлять чтение.
+    // Если фантомов > 3, просто вернем топ-3 для клиента, не удаляя файлы пока.
+
+    let phantoms = meta.active_phantoms;
+    if (phantoms.length > MAX_PHANTOMS) {
+        phantoms = [...phantoms].sort((a, b) => b.score - a.score).slice(0, MAX_PHANTOMS);
+    }
+
     const replays: ReplayData[] = [];
 
-    for (const phantom of meta.active_phantoms) {
+    for (const phantom of phantoms) {
         const replay = await getReplay(seed, phantom.replayId);
         if (replay) {
             replays.push(replay);
@@ -200,11 +214,39 @@ export async function addReplayToRoom(seed: string, replay: ReplayData): Promise
     const newPhantom: PhantomInfo = {
         replayId: replay.id,
         score: replay.finalScore,
-        spawnIndex: replay.startParams.spawnIndex
+        spawnIndex: replay.startParams.spawnIndex,
+        playerId: replay.playerId
     };
 
+    // 1. Проверка на коллизию спавна (Race Condition Handling)
+    // Если игрок играл на точке, которая уже занята (например, другой игрок успел записать результат раньше),
+    // мы должны сравнить их и оставить только лучшего на этой точке.
+    const collisionIndex = meta.active_phantoms.findIndex(p => p.spawnIndex === replay.startParams.spawnIndex);
+
+    if (collisionIndex !== -1) {
+        const incumbent = meta.active_phantoms[collisionIndex];
+
+        if (replay.finalScore > incumbent.score) {
+            console.log(`[Room ${seed}] Spawn Collision at ${incumbent.spawnIndex}. New (${replay.finalScore}) beats Old (${incumbent.score}). Replacing.`);
+
+            // Удаляем старый реплей
+            await deleteReplay(seed, incumbent.replayId);
+
+            // Заменяем на новый
+            meta.active_phantoms[collisionIndex] = newPhantom;
+            await saveReplay(seed, replay);
+            await saveRoomMeta(seed, meta);
+            return true;
+        } else {
+            console.log(`[Room ${seed}] Spawn Collision at ${incumbent.spawnIndex}. New (${replay.finalScore}) lost to Old (${incumbent.score}). Discarding.`);
+            await saveRoomMeta(seed, meta);
+            return false;
+        }
+    }
+
+    // 2. Если коллизии нет, используем стандартную логику Top-N
+    // Если активных фантомов меньше максимума (3)
     if (meta.active_phantoms.length < MAX_PHANTOMS) {
-        // Есть свободные слоты — просто добавляем
         meta.active_phantoms.push(newPhantom);
         await saveReplay(seed, replay);
         await saveRoomMeta(seed, meta);
@@ -258,50 +300,77 @@ export async function getOccupiedSpawnIndices(seed: string): Promise<number[]> {
 }
 
 /**
- * Найти свободную точку спавна или вытеснить слабейшего игрока
- * Возвращает: { spawnIndex: number, evictedReplayId?: string }
+ * Проверить, есть ли у игрока активный фантом в комнате
  */
-export async function assignSpawnIndex(seed: string): Promise<{ spawnIndex: number; evictedReplayId?: string }> {
+export async function isPlayerActiveInRoom(seed: string, playerId: string): Promise<boolean> {
     const meta = await getRoomMeta(seed);
+
+    for (const phantom of meta.active_phantoms) {
+        // Если playerId записан в метаданных (новый формат)
+        if (phantom.playerId && phantom.playerId === playerId) {
+            return true;
+        }
+
+        // Если playerId нет (старый формат), проверяем файл реплея
+        if (!phantom.playerId) {
+            const replay = await getReplay(seed, phantom.replayId);
+            if (replay && replay.playerId === playerId) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Найти свободную точку спавна.
+ * Если комната содержит старые данные (>3 фантомов), производит очистку.
+ */
+export async function assignSpawnIndex(seed: string): Promise<{ spawnIndex: number }> {
+    const meta = await getRoomMeta(seed);
+
+    // Миграция/Очистка: Если фантомов больше, чем MAX_PHANTOMS (3), удаляем лишних
+    if (meta.active_phantoms.length > MAX_PHANTOMS) {
+        console.log(`[Room ${seed}] Cleanup: Has ${meta.active_phantoms.length} phantoms, limit is ${MAX_PHANTOMS}. Removing weakest.`);
+
+        while (meta.active_phantoms.length > MAX_PHANTOMS) {
+            // Находим слабейшего
+            let worstIndex = 0;
+            let worstScore = meta.active_phantoms[0].score;
+            for (let i = 1; i < meta.active_phantoms.length; i++) {
+                if (meta.active_phantoms[i].score < worstScore) {
+                    worstScore = meta.active_phantoms[i].score;
+                    worstIndex = i;
+                }
+            }
+
+            const evictedId = meta.active_phantoms[worstIndex].replayId;
+            console.log(`[Room ${seed}] Cleanup: Evicting ${evictedId} (score: ${worstScore})`);
+
+            await deleteReplay(seed, evictedId);
+            meta.active_phantoms.splice(worstIndex, 1);
+        }
+
+        await saveRoomMeta(seed, meta);
+    }
 
     // Получаем занятые точки
     const occupiedIndices = meta.active_phantoms
         .filter(p => p.spawnIndex !== undefined)
         .map(p => p.spawnIndex);
 
-    // Ищем свободную точку (0-3)
-    for (let i = 0; i < MAX_PHANTOMS; i++) {
+    // Ищем свободную точку (0-MAX_SPAWN_POINTS)
+    for (let i = 0; i < MAX_SPAWN_POINTS; i++) {
         if (!occupiedIndices.includes(i)) {
             console.log(`[Room ${seed}] Found free spawn index: ${i}`);
             return { spawnIndex: i };
         }
     }
 
-    // Все точки заняты — вытесняем слабейшего игрока
-    console.log(`[Room ${seed}] All spawn points occupied, evicting weakest phantom`);
-
-    let worstIndex = 0;
-    let worstScore = meta.active_phantoms[0].score;
-
-    for (let i = 1; i < meta.active_phantoms.length; i++) {
-        if (meta.active_phantoms[i].score < worstScore) {
-            worstScore = meta.active_phantoms[i].score;
-            worstIndex = i;
-        }
-    }
-
-    const evictedPhantom = meta.active_phantoms[worstIndex];
-    const evictedSpawnIndex = evictedPhantom.spawnIndex ?? 0;
-    const evictedReplayId = evictedPhantom.replayId;
-
-    // Удаляем старый реплей из файловой системы
-    await deleteReplay(seed, evictedReplayId);
-
-    // Удаляем фантома из списка активных
-    meta.active_phantoms.splice(worstIndex, 1);
-    await saveRoomMeta(seed, meta);
-
-    console.log(`[Room ${seed}] Evicted phantom ${evictedReplayId} (score: ${worstScore}) to free spawn index ${evictedSpawnIndex}`);
-
-    return { spawnIndex: evictedSpawnIndex, evictedReplayId };
+    // Если мы здесь, значит все точки заняты, хотя фантомов всего 3.
+    // Это невозможно математически, если MAX_SPAWN_POINTS=4 и MAX_PHANTOMS=3.
+    // Но на всякий случай вернем 0 или выбросим ошибку.
+    console.error(`[Room ${seed}] Critical Error: No free spawn points! Active phantoms: ${meta.active_phantoms.length}, Max Spawn: ${MAX_SPAWN_POINTS}`);
+    return { spawnIndex: 0 };
 }

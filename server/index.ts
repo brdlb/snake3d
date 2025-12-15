@@ -2,13 +2,11 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import { AuthManager } from './auth.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { getRoomData, processGameOver, findRoomForPlayer, logRoomsSummary } from './room/RoomService.js';
+
+import { getRoomData, processGameOver, findRoomForPlayer, logRoomsSummary, getLeaderboard } from './room/RoomService.js';
 import type { GameOverPayload } from './room/types.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+
 
 const app = express();
 const httpServer = createServer(app);
@@ -49,8 +47,7 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Статические файлы для продакшена
-app.use(express.static(path.join(__dirname, '../dist')));
+
 
 // Обработка подключений Socket.IO
 io.on('connection', (socket) => {
@@ -187,6 +184,19 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Запрос таблицы рекордов
+    socket.on('leaderboard:request', async () => {
+        try {
+            // Получаем топ-50
+            const leaderboard = await getLeaderboard(50);
+            socket.emit('leaderboard:data', leaderboard);
+            console.log(`[Leaderboard] Sent top ${leaderboard.length} records to ${socket.id}`);
+        } catch (error) {
+            console.error(`[Leaderboard] Error fetching leaderboard:`, error);
+            socket.emit('leaderboard:error', { message: 'Failed to fetch leaderboard' });
+        }
+    });
+
     socket.on('disconnect', (reason) => {
         console.log(`[Disconnect] Client ${socket.id} disconnected: ${reason}`);
     });
@@ -201,7 +211,7 @@ interface UserData {
     gamesPlayed?: number;
 }
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3055;
 
 httpServer.listen(PORT, () => {
     console.log(`

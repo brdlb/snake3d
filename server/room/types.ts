@@ -44,6 +44,7 @@ export interface PhantomInfo {
     replayId: string;
     score: number;
     spawnIndex: number; // Индекс точки спавна (0-3)
+    playerId?: string;   // ID игрока (опционально для обратной совместимости)
 }
 
 // Метаданные комнаты
@@ -66,4 +67,12 @@ export interface RoomData {
 export interface GameOverPayload {
     seed: number;
     replay: Partial<ReplayData>;
+}
+
+export interface LeaderboardEntry {
+    playerName: string;
+    score: number;
+    seed: number;
+    date: number;
+    replayId: string;
 }

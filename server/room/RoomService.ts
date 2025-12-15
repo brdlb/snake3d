@@ -8,9 +8,10 @@ import {
     getAllRoomSeeds,
     getRoomMeta,
     hasPlayerPlayedInRoom,
-    assignSpawnIndex
+    assignSpawnIndex,
+    getReplay
 } from './RoomRepository.js';
-import type { ReplayData, RoomData, GameOverPayload } from './types.js';
+import type { ReplayData, RoomData, GameOverPayload, LeaderboardEntry } from './types.js';
 
 /**
  * Получить данные комнаты для клиента (seed + активные фантомы + назначенная точка спавна)
@@ -46,24 +47,58 @@ export async function findRoomForPlayer(playerId: string): Promise<RoomData> {
 
     console.log(`[RoomService] Finding room for player ${playerId.substring(0, 8)}... (${allSeeds.length} rooms exist)`);
 
-    // Ищем комнаты, в которых игрок ещё не играл
-    const unplayedSeeds: string[] = [];
+    // Ищем комнату, в которой игрок не играл И в которой меньше всего игр
+    let candidates: string[] = [];
+    let minGames = Infinity;
+    let unplayedCount = 0;
 
     for (const seed of allSeeds) {
-        const hasPlayed = await hasPlayerPlayedInRoom(seed, playerId);
-        if (!hasPlayed) {
-            unplayedSeeds.push(seed);
+        // Получаем метаданные один раз, чтобы проверить и историю, и количество игр
+        const meta = await getRoomMeta(seed);
+
+        // Проверяем, есть ли у игрока активные игры в этой комнате
+        let hasActiveGame = false;
+        for (const phantom of meta.active_phantoms) {
+            if (phantom.playerId === playerId) {
+                hasActiveGame = true;
+                break;
+            }
+            // Fallback для старых записей
+            if (!phantom.playerId) {
+                const replay = await getReplay(seed, phantom.replayId);
+                if (replay && replay.playerId === playerId) {
+                    hasActiveGame = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasActiveGame) {
+            continue;
+        }
+
+
+        unplayedCount++;
+
+        if (meta.total_games_played < minGames) {
+            // Нашли новый минимум - сбрасываем кандидатов
+            minGames = meta.total_games_played;
+            candidates = [seed];
+        } else if (meta.total_games_played === minGames) {
+            // Такой же минимум - добавляем в кандидатов
+            candidates.push(seed);
         }
     }
 
-    console.log(`[RoomService] Player ${playerId.substring(0, 8)} has ${unplayedSeeds.length} unplayed rooms`);
+    console.log(`[RoomService] Player ${playerId.substring(0, 8)} has ${unplayedCount} unplayed rooms`);
 
-    if (unplayedSeeds.length > 0) {
-        // Выбираем случайную несыгранную комнату
-        const randomIndex = Math.floor(Math.random() * unplayedSeeds.length);
-        const selectedSeed = unplayedSeeds[randomIndex];
+    if (candidates.length > 0) {
+        // Если есть несколько кандидатов с одинаковым минимумом - выбираем случайного
+        // Это полезно, например, если есть много новых комнат с 0 игр
+        const randomIndex = Math.floor(Math.random() * candidates.length);
+        const selectedSeed = candidates[randomIndex];
 
-        console.log(`[RoomService] Selected existing room: ${selectedSeed}`);
+        console.log(`[RoomService] Selected room with fewest games (${minGames}): ${selectedSeed} (from ${candidates.length} candidates)`);
         return getRoomData(parseInt(selectedSeed, 10));
     }
 
@@ -157,4 +192,50 @@ export async function logRoomsSummary(): Promise<void> {
         }
     }
     console.log('╚═══════════════════════════════════════╝\n');
+}
+
+/**
+ * Получить таблицу рекордов (Топ-N) из активных фантомов
+ */
+export async function getLeaderboard(limit: number = 10): Promise<LeaderboardEntry[]> {
+    const seeds = await getAllRoomSeeds();
+
+    // Собираем всех фантомов со всех комнат
+    // Используем простой массив объектов для первичной сортировки
+    const allPhantoms: { score: number; replayId: string; seed: string }[] = [];
+
+    for (const seed of seeds) {
+        const meta = await getRoomMeta(seed);
+        for (const phantom of meta.active_phantoms) {
+            allPhantoms.push({
+                score: phantom.score,
+                replayId: phantom.replayId,
+                seed: seed
+            });
+        }
+    }
+
+    // Сортируем по убыванию очков
+    allPhantoms.sort((a, b) => b.score - a.score);
+
+    // Берём топ-N
+    const topPhantoms = allPhantoms.slice(0, limit);
+
+    // Для топа подгружаем полные данные (имена, даты)
+    const leaderboard: LeaderboardEntry[] = [];
+
+    for (const p of topPhantoms) {
+        const replay = await getReplay(p.seed, p.replayId);
+        if (replay) {
+            leaderboard.push({
+                playerName: replay.playerName,
+                score: replay.finalScore,
+                seed: parseInt(p.seed, 10),
+                date: replay.timestamp,
+                replayId: replay.id
+            });
+        }
+    }
+
+    return leaderboard;
 }

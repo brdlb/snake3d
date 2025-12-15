@@ -15,6 +15,7 @@ import { SettingsUI } from '../ui/SettingsUI';
 import { GameOverUI } from '../ui/GameOverUI';
 import { GameHUD } from '../ui/GameHUD';
 import { WelcomeScreen } from '../ui/WelcomeScreen';
+import { LeaderboardUI } from '../ui/LeaderboardUI';
 import { SoundManager } from '../audio/SoundManager';
 import { ReplayRecorder } from './ReplaySystem';
 import { NetworkManager } from '../network/NetworkManager';
@@ -41,6 +42,7 @@ export class Game {
     private pauseUI: PauseUI;
     private hud: GameHUD;
     private welcomeScreen: WelcomeScreen;
+    private leaderboardUI: LeaderboardUI;
     private soundManager: SoundManager;
     private pathfinder: Pathfinder;
 
@@ -70,6 +72,7 @@ export class Game {
     private isWaitingForStart: boolean = true;
 
     private _visibilityHandler: () => void;
+    private _blurHandler: () => void;
 
     // Async Multiplayer: Phantoms & Replay
     private phantoms: Phantom[] = [];
@@ -82,9 +85,12 @@ export class Game {
     // Pause & Stats
     private isPaused: boolean = false;
     private gameStats: GameStats = {
+        score: 0,
+        length: 5,
         time: 0,
         distance: 0,
         avgSpeed: 0,
+        maxSpeed: 0,
         foodCount: { green: 0, blue: 0, pink: 0, total: 0 }
     };
     // Accumulator for average speed calculation (sum of speeds per frame / frames)
@@ -92,8 +98,15 @@ export class Game {
     private totalSpeedAccumulator: number = 0;
     private speedSamples: number = 0;
     private playerSpawnIndex: number = 0;
+    private playerName: string;
+
+    private lastRecordedDirection: THREE.Vector3 = new THREE.Vector3();
 
     constructor() {
+        // Initialize Player Name (Persistent)
+        this.playerName = localStorage.getItem('snake3d_player_name') || `Player${Math.floor(Math.random() * 10000)}`;
+        localStorage.setItem('snake3d_player_name', this.playerName);
+
         // 1. Managers Setup
         this.settingsManager = new SettingsManager();
         this.sceneManager = new SceneManager(this.settingsManager.cameraConfig.fov);
@@ -125,7 +138,15 @@ export class Game {
             }
         );
 
-        this.gameOverUI = new GameOverUI(() => this.resetGame());
+
+
+        // Leaderboard UI
+        this.leaderboardUI = new LeaderboardUI(this.playerName);
+
+        this.gameOverUI = new GameOverUI(
+            () => this.resetGame(),
+            () => this.leaderboardUI.show()
+        );
         this.hud = new GameHUD();
 
         this.pauseUI = new PauseUI(
@@ -135,7 +156,8 @@ export class Game {
                 this.pauseUI.hide(); // Hide Pause UI
                 this.hud.togglePauseButton(false); // Hide Pause Button
                 this.settingsUI.show(); // Show Settings
-            }
+            },
+            () => this.leaderboardUI.show()
         );
 
         // Add Pause Button to HUD
@@ -242,12 +264,23 @@ export class Game {
         // Visibility Handler to stop loop when tab is hidden
         this._visibilityHandler = () => {
             if (document.hidden) {
+                if (!this.isPaused && !this.isGameOver && !this.isWaitingForStart) {
+                    this.togglePause();
+                }
                 this.loop.stop();
             } else {
                 this.loop.start();
             }
         };
         document.addEventListener('visibilitychange', this._visibilityHandler);
+
+        // Blur Handler to pause when window loses focus
+        this._blurHandler = () => {
+            if (!this.isPaused && !this.isGameOver && !this.isWaitingForStart) {
+                this.togglePause();
+            }
+        };
+        window.addEventListener('blur', this._blurHandler);
 
         // Input Bindings
         this.setupInputs();
@@ -259,6 +292,12 @@ export class Game {
 
         // Welcome Screen - показываем приветственный экран
         this.welcomeScreen = new WelcomeScreen(() => this.handleGameStart());
+
+        // Initialize Player Name
+        const user = this.networkManager.getUser();
+        // Check for stored name fallback
+        const storedName = localStorage.getItem('snake3d_username');
+        this.playerName = user?.username || storedName || `Player ${Math.floor(Math.random() * 9000) + 1000}`;
     }
 
     private setupInputs() {
@@ -267,16 +306,6 @@ export class Game {
             action();
             if (!this.snake.direction.equals(prevDir)) {
                 this.pathfinder.updatePathVisualization(this.snake.getHead(), this.snake.segments, this.snake.direction);
-                // Записываем изменение направления для реплея
-                if (this.replayRecorder) {
-                    const head = this.snake.getHead();
-                    const newDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction);
-                    // Snap to grid
-                    if (Math.abs(newDir.x) > 0.5) newDir.set(Math.sign(newDir.x), 0, 0);
-                    else if (Math.abs(newDir.y) > 0.5) newDir.set(0, Math.sign(newDir.y), 0);
-                    else newDir.set(0, 0, Math.sign(newDir.z));
-                    this.replayRecorder.recordDirectionChange(head, newDir);
-                }
             }
         };
 
@@ -324,6 +353,7 @@ export class Game {
         if (Math.abs(initialDir.x) > 0.5) initialDir.set(Math.sign(initialDir.x), 0, 0);
         else if (Math.abs(initialDir.y) > 0.5) initialDir.set(0, Math.sign(initialDir.y), 0);
         else initialDir.set(0, 0, Math.sign(initialDir.z));
+        this.lastRecordedDirection.copy(initialDir);
         this.replayRecorder.start(initialDir, spawn.position);
     }
 
@@ -362,12 +392,13 @@ export class Game {
         this.input.destroy();
         window.removeEventListener('resize', this.onWindowResize.bind(this));
         document.removeEventListener('visibilitychange', this._visibilityHandler);
+        window.removeEventListener('blur', this._blurHandler);
 
         // Dispose Managers
         this.sceneManager.dispose();
         this.settingsUI.dispose();
         this.gameOverUI.dispose();
-        this.gameOverUI.dispose();
+        this.leaderboardUI.dispose();
         this.pauseUI.dispose();
         this.hud.dispose();
         if (this.welcomeScreen) this.welcomeScreen.dispose();
@@ -441,6 +472,13 @@ export class Game {
             this.gameStats.avgSpeed = this.totalSpeedAccumulator / this.speedSamples;
         }
 
+        // Stats: Dynamic
+        this.gameStats.score = this.score;
+        this.gameStats.length = this.snake.segments.length;
+        if (this.currentSPM > (this.gameStats.maxSpeed || 0)) {
+            this.gameStats.maxSpeed = this.currentSPM;
+        }
+
         // Boost
         if (this.input.isActionPressed('boost')) {
             this.snake.setSpeed(0.05);
@@ -449,8 +487,25 @@ export class Game {
         }
 
         // Logic Update
+        const preStepHead = this.snake.getHead().clone();
         if (this.snake.update(delta)) {
-            // Step occurred - выводим координаты и направление
+            // Step occurred - check if we need to record a direction change
+            if (this.replayRecorder) {
+                const currentDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction);
+                // Snap to grid
+                if (Math.abs(currentDir.x) > 0.5) currentDir.set(Math.sign(currentDir.x), 0, 0);
+                else if (Math.abs(currentDir.y) > 0.5) currentDir.set(0, Math.sign(currentDir.y), 0);
+                else currentDir.set(0, 0, Math.sign(currentDir.z));
+
+                if (!currentDir.equals(this.lastRecordedDirection)) {
+                    // Direction changed since the last step!
+                    // Record it as happening at the PREVIOUS head position (where the turn effectively executed)
+                    this.replayRecorder.recordDirectionChange(preStepHead, currentDir);
+                    this.lastRecordedDirection.copy(currentDir);
+                }
+            }
+
+            // выводим координаты и направление
             const stepHead = this.snake.getHead();
             const stepDir = new THREE.Vector3(0, 0, 1).applyQuaternion(this.snake.direction);
 
@@ -478,6 +533,12 @@ export class Game {
             if (!phantom.isDeadNow()) {
                 // Phantom manages its own speed internally
                 if (phantom.update(delta)) {
+                    // Safety check: Kill if out of bounds (prevents infinite walking if replay desyncs)
+                    if (this.world.isOutOfBounds(phantom.getHead())) {
+                        console.warn(`[Game] Phantom ${phantom.getPlayerName()} went out of bounds at ${phantom.getHead().toArray()}. Killing.`);
+                        phantom.kill();
+                        continue;
+                    }
                     // Phantom made a step - check if it eats food
                     const phantomHead = phantom.getHead();
                     const phantomFoodIndex = this.world.checkFoodCollision(phantomHead);
@@ -568,7 +629,7 @@ export class Game {
 
         // Current player first
         players.push({
-            name: 'You',
+            name: this.playerName,
             score: this.score,
             length: currentLength,
             speed: speed,
@@ -578,18 +639,17 @@ export class Game {
 
         // Add phantoms
         for (const phantom of this.phantoms) {
-            if (!phantom.isDeadNow()) {
-                // Use player's readable name
-                const name = phantom.getPlayerName();
-                players.push({
-                    name: name,
-                    score: phantom.getScore(),
-                    length: phantom.segments.length,
-                    speed: phantom.getSPM(),
-                    isPlayer: false,
-                    color: phantom.getColorHex()
-                });
-            }
+            // Include dead phantoms so they show up as dead in HUD
+            const name = phantom.getPlayerName();
+            players.push({
+                name: name,
+                score: phantom.getScore(),
+                length: phantom.segments.length,
+                speed: phantom.getSPM(),
+                isPlayer: false,
+                color: phantom.getColorHex(),
+                isDead: phantom.isDeadNow()
+            });
         }
 
         this.hud.updatePlayers(players);
@@ -725,14 +785,17 @@ export class Game {
         this.particleSystem.stopTime();
         this.soundManager.playGameOver();
         this.soundManager.setAmbientLowPass(true);
+        this.gameOverUI.updateStats(this.gameStats);
         this.gameOverUI.show();
+        this.hud.togglePauseButton(false);
+        this.hud.setVisibility(false);
 
         // Stop replay recording and send to server
         if (this.replayRecorder) {
             this.replayRecorder.stop();
 
             const deathPosition = this.snake.getHead();
-            const replayData = this.replayRecorder.getReplayData(this.score, deathPosition);
+            const replayData = this.replayRecorder.getReplayData(this.score, deathPosition, this.playerName);
 
             if (this.networkManager.isConnected()) {
                 this.networkManager.send('game:over', {
@@ -749,12 +812,17 @@ export class Game {
         this.pauseUI.hide();
         this.isGameOver = false;
         this.isPaused = false;
+        this.hud.togglePauseButton(true);
+        this.hud.setVisibility(true);
 
         // Reset Stats
         this.gameStats = {
+            score: 0,
+            length: 5,
             time: 0,
             distance: 0,
             avgSpeed: 0,
+            maxSpeed: 0,
             foodCount: { green: 0, blue: 0, pink: 0, total: 0 }
         };
         this.totalSpeedAccumulator = 0;

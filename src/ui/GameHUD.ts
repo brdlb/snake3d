@@ -8,6 +8,7 @@ export interface PlayerInfo {
     speed: number;
     isPlayer?: boolean; // true для текущего игрока
     color?: string;     // цвет игрока (hex)
+    isDead?: boolean;   // жив или мертв
 }
 
 export class GameHUD {
@@ -42,25 +43,66 @@ export class GameHUD {
             if (player.isPlayer) {
                 row.classList.add('hud-player-current');
             }
+            if (player.isDead) {
+                row.classList.add('hud-player-dead');
+            }
 
-            // Цветной индикатор
+            // Header: Color + Name
+            const header = document.createElement('div');
+            header.className = 'hud-player-header';
+
             const colorDot = document.createElement('span');
             colorDot.className = 'hud-player-color';
-            colorDot.style.backgroundColor = player.color || '#ffffff';
 
-            // Имя игрока
+            if (player.isDead) {
+                // Show 'X' for dead players
+                colorDot.textContent = '✕'; // Cross character
+                colorDot.style.color = '#ff0000'; // Red color for cross
+                colorDot.style.backgroundColor = 'transparent';
+                colorDot.style.boxShadow = 'none';
+                colorDot.style.fontSize = '14px';
+                colorDot.style.lineHeight = '12px';
+                colorDot.style.textAlign = 'center';
+                colorDot.style.fontWeight = 'bold';
+            } else {
+                colorDot.style.backgroundColor = player.color || '#ffffff';
+                colorDot.style.boxShadow = `0 0 5px ${player.color || '#ffffff'}`;
+            }
+
             const nameEl = document.createElement('span');
             nameEl.className = 'hud-player-name';
             nameEl.textContent = player.name;
 
-            // Статистика
-            const statsEl = document.createElement('span');
-            statsEl.className = 'hud-player-stats';
-            statsEl.textContent = `score:${player.score} length:${player.length} speed:${player.speed}`;
+            header.appendChild(colorDot);
+            header.appendChild(nameEl);
+            row.appendChild(header);
 
-            row.appendChild(colorDot);
-            row.appendChild(nameEl);
-            row.appendChild(statsEl);
+            // Stats Row: Score, Length, Speed
+            const statsRow = document.createElement('div');
+            statsRow.className = 'hud-player-stats-row';
+
+            const createStat = (label: string, value: string | number) => {
+                const statEl = document.createElement('div');
+                statEl.className = 'hud-stat';
+
+                const labelEl = document.createElement('span');
+                labelEl.className = 'hud-stat-label';
+                labelEl.textContent = label;
+
+                const valueEl = document.createElement('span');
+                valueEl.className = 'hud-stat-value';
+                valueEl.textContent = value.toString();
+
+                statEl.appendChild(labelEl);
+                statEl.appendChild(valueEl);
+                return statEl;
+            };
+
+            statsRow.appendChild(createStat('SCORE', player.score));
+            statsRow.appendChild(createStat('LEN', player.length));
+            statsRow.appendChild(createStat('SPD', Math.round(player.speed)));
+
+            row.appendChild(statsRow);
             this.playersContainer.appendChild(row);
         }
     }
@@ -138,5 +180,9 @@ export class GameHUD {
         if (btn) {
             btn.style.display = visible ? 'flex' : 'none';
         }
+    }
+
+    public setVisibility(visible: boolean) {
+        this.container.style.display = visible ? 'block' : 'none';
     }
 }

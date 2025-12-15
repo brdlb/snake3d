@@ -85,12 +85,13 @@ export class ReplayRecorder {
     /**
      * Получить данные для сохранения реплея
      */
-    public getReplayData(finalScore: number, deathPosition: THREE.Vector3): Partial<ReplayData> {
+    public getReplayData(finalScore: number, deathPosition: THREE.Vector3, playerName: string): Partial<ReplayData> {
         return {
             startParams: this.startParams,
             finalScore,
             deathPosition: toVec3(deathPosition),
-            trajectoryLog: [...this.trajectoryLog]
+            trajectoryLog: [...this.trajectoryLog],
+            playerName
         };
     }
 
@@ -158,8 +159,11 @@ export class ReplayPlayer {
             return null;
         }
 
+        let lastFoundDirection: THREE.Vector3 | null = null;
+
         // Проверяем, достигли ли следующей точки поворота
-        if (this.currentIndex < this.trajectoryLog.length) {
+        // Loop through ALL changes at this position to handle rapid turns (multiple turns within one step)
+        while (this.currentIndex < this.trajectoryLog.length) {
             const nextChange = this.trajectoryLog[this.currentIndex];
             const targetPos = fromVec3(nextChange.position);
 
@@ -168,13 +172,16 @@ export class ReplayPlayer {
                 const newDirection = fromVec3(nextChange.direction);
                 this.currentDirection.copy(newDirection);
                 this.currentIndex++;
+                lastFoundDirection = newDirection;
 
-                console.log(`[ReplayPlayer] Phantom ${this.replayId} changed direction at (${currentPosition.x}, ${currentPosition.y}, ${currentPosition.z})`);
-                return newDirection;
+                console.log(`[ReplayPlayer] Phantom ${this.replayId} processed direction change at (${currentPosition.x}, ${currentPosition.y}, ${currentPosition.z})`);
+            } else {
+                // Next change is at a different position
+                break;
             }
         }
 
-        return null;
+        return lastFoundDirection;
     }
 
     /**

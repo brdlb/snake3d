@@ -25,24 +25,24 @@ export const SPAWN_POINTS: SpawnPoint[] = [
     // Нижний уровень (y = OFFSET)
     // Направления настроены так, чтобы игрок двигался ОТ ближайших стен к центру
     {
-        // Угол (0, 0, 0) - движется в +Z (от стены Z=0)
+
         position: new THREE.Vector3(OFFSET, OFFSET, OFFSET),
         direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
     },
     {
-        // Угол (50, 0, 0) - движется в -X (от стены X=50)
+
         position: new THREE.Vector3(WORLD_SIZE - OFFSET, OFFSET, OFFSET),
         direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2)
     },
     {
-        // Угол (0, 0, 50) - движется в +X (от стены X=0)
+
         position: new THREE.Vector3(OFFSET, OFFSET, WORLD_SIZE - OFFSET),
         direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2)
     },
     {
-        // Угол (50, 0, 50) - движется в -X (от стены X=50)
+
         position: new THREE.Vector3(WORLD_SIZE - OFFSET, OFFSET, WORLD_SIZE - OFFSET),
-        direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2)
+        direction: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0)
     },
 ];
 

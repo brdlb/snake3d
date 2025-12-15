@@ -3,9 +3,12 @@
  * Interface for Game Statistics displayed in Pause Menu
  */
 export interface GameStats {
+    score: number;      // Current score
+    length: number;     // Current snake length
     time: number;       // In seconds
     distance: number;   // Total units traveled
     avgSpeed: number;   // Average SPM
+    maxSpeed?: number;  // Max SPM (optional)
     foodCount: {
         green: number;
         blue: number;
@@ -20,6 +23,8 @@ export class PauseUI {
     private settingsBtn!: HTMLButtonElement;
 
     // Stats Elements
+    private scoreEl!: HTMLElement;
+    private lengthEl!: HTMLElement;
     private timeEl!: HTMLElement;
     private distanceEl!: HTMLElement;
     private speedEl!: HTMLElement;
@@ -29,10 +34,12 @@ export class PauseUI {
 
     private onResume: () => void;
     private onSettings: () => void;
+    private onLeaderboard: () => void;
 
-    constructor(onResume: () => void, onSettings: () => void) {
+    constructor(onResume: () => void, onSettings: () => void, onLeaderboard: () => void) {
         this.onResume = onResume;
         this.onSettings = onSettings;
+        this.onLeaderboard = onLeaderboard;
         this.createUI();
     }
 
@@ -55,6 +62,8 @@ export class PauseUI {
         const statsInner = document.createElement('div');
         statsInner.className = 'stats-inner';
 
+        this.scoreEl = this.createStatRow(statsInner, 'SCORE');
+        this.lengthEl = this.createStatRow(statsInner, 'LENGTH');
         this.timeEl = this.createStatRow(statsInner, 'TIME');
         this.distanceEl = this.createStatRow(statsInner, 'DIST');
         this.speedEl = this.createStatRow(statsInner, 'AVG SPD');
@@ -93,6 +102,14 @@ export class PauseUI {
         this.container.appendChild(titlePanel);
         this.container.appendChild(statsPanel);
         this.container.appendChild(this.settingsBtn);
+
+        // Leaderboard Button
+        const leadersBtn = document.createElement('button');
+        leadersBtn.className = 'pause-panel menu-btn leaders-btn';
+        leadersBtn.textContent = 'LEADERS';
+        leadersBtn.onclick = () => this.onLeaderboard();
+        this.container.appendChild(leadersBtn);
+
         this.container.appendChild(this.resumeBtn);
 
         document.body.appendChild(this.container);
@@ -270,6 +287,15 @@ export class PauseUI {
                 color: #4ade80;
             }
 
+            .leaders-btn {
+                transition-delay: 0.25s;
+                border-right-color: #0088ff; /* Blue */
+                padding: 30px 60px;
+            }
+            .leaders-btn:hover {
+                color: #0088ff;
+            }
+
 
             /* Responsive Adjustments */
             @media (max-width: 600px) {
@@ -289,6 +315,8 @@ export class PauseUI {
     }
 
     public updateStats(stats: GameStats) {
+        this.scoreEl.textContent = stats.score.toString();
+        this.lengthEl.textContent = stats.length.toString();
         this.timeEl.textContent = this.formatTime(stats.time);
         this.distanceEl.textContent = Math.round(stats.distance).toString();
         this.speedEl.textContent = Math.round(stats.avgSpeed).toString();
