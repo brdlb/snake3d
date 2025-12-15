@@ -18,7 +18,9 @@ export class LeaderboardUI {
     private isVisible: boolean = false;
 
 
-    constructor(private readonly currentPlayerName: string) {
+
+
+    constructor(private currentPlayerName: string) {
         // Create container structure
         this.container = document.createElement('div');
         this.container.className = 'leaderboard-screen';
@@ -39,6 +41,8 @@ export class LeaderboardUI {
         title.className = 'leaderboard-title';
         title.textContent = 'TOP PHANTOMS';
         header.appendChild(title);
+
+
 
         this.closeBtn = document.createElement('button');
         this.closeBtn.className = 'leaderboard-close';
@@ -84,7 +88,6 @@ export class LeaderboardUI {
         this.isVisible = true;
         this.container.classList.add('active');
         this.tableBody.innerHTML = '<div class="leaderboard-message helper-text">Loading...</div>';
-        this.tableBody.innerHTML = '<div class="leaderboard-message helper-text">Loading...</div>';
         networkManager.requestLeaderboard();
     }
 
@@ -102,6 +105,11 @@ export class LeaderboardUI {
         }
 
         data.forEach((entry, index) => {
+            // Debug matching
+            if (entry.playerName === this.currentPlayerName) {
+                console.log(`[Leaderboard] Found match for current player: ${entry.playerName}`);
+            }
+
             const row = document.createElement('div');
             row.className = 'leaderboard-row';
 
@@ -134,5 +142,8 @@ export class LeaderboardUI {
 
     public dispose(): void {
         this.container.remove();
+    }
+    public setPlayerName(name: string): void {
+        this.currentPlayerName = name;
     }
 }

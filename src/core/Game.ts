@@ -261,6 +261,28 @@ export class Game {
             console.log(`[Game] Game result: ${result.message}`);
         });
 
+        // Check if already authenticated (initialized in main.ts)
+        const currentUser = this.networkManager.getUser();
+        if (currentUser) {
+            console.log(`[Game] Initial player name sync: ${currentUser.username}`);
+            this.playerName = currentUser.username;
+            localStorage.setItem('snake3d_player_name', this.playerName);
+            // LeaderboardUI might not be initialized yet if this is called early, 
+            // but we are in constructor, LeaderboardUI is init at line 140. 
+            // We are at line ~250. So it is strictly safe.
+            this.leaderboardUI.setPlayerName(this.playerName);
+        }
+
+        // Listen for authentication to sync player name (reconnects)
+        this.networkManager.on('authenticated', (result: any) => {
+            if (result.user && result.user.username) {
+                console.log(`[Game] Syncing player name from server: ${result.user.username}`);
+                this.playerName = result.user.username;
+                localStorage.setItem('snake3d_player_name', this.playerName);
+                this.leaderboardUI.setPlayerName(this.playerName);
+            }
+        });
+
         // Visibility Handler to stop loop when tab is hidden
         this._visibilityHandler = () => {
             if (document.hidden) {

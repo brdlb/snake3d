@@ -720,6 +720,16 @@ body {
   letter-spacing: 2px;
 }
 
+.leaderboard-player-info {
+  font-family: 'Jura', system-ui, sans-serif;
+  font-size: 0.9rem;
+  color: #0088ff;
+  border: 1px solid rgba(0, 136, 255, 0.3);
+  padding: 4px 10px;
+  background: rgba(0, 136, 255, 0.1);
+  border-radius: 4px;
+}
+
 .leaderboard-close {
   background: transparent;
   border: none;
