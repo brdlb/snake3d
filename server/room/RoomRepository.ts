@@ -79,6 +79,13 @@ export async function getRoomMeta(seed: string): Promise<RoomMeta> {
             meta.players_history = [];
         }
 
+        // Миграция: добавляем ELO фантомам если отсутствует
+        meta.active_phantoms.forEach(p => {
+            if (p.elo === undefined) {
+                p.elo = p.score || 1000;
+            }
+        });
+
         return meta;
     } catch {
         // Комната не существует — создаём пустую
@@ -138,9 +145,10 @@ export async function deleteReplay(seed: string, replayId: string): Promise<void
 }
 
 /**
- * Получить все активные реплеи для комнаты
+ * Получить все активные реплеи для комнаты.
+ * Если передан excludePlayerId, этот реплей не будет включен в список (игрок заменяет его).
  */
-export async function getActiveReplays(seed: string): Promise<ReplayData[]> {
+export async function getActiveReplays(seed: string, excludePlayerId?: string): Promise<ReplayData[]> {
     const meta = await getRoomMeta(seed);
     // При чтении реплеев также можно сделать lazy cleanup, 
     // но лучше это делать в assignSpawnIndex, чтобы не замедлять чтение.
@@ -154,6 +162,11 @@ export async function getActiveReplays(seed: string): Promise<ReplayData[]> {
     const replays: ReplayData[] = [];
 
     for (const phantom of phantoms) {
+        // Пропускаем фантома текущего игрока, если нужно (он займет его место)
+        if (excludePlayerId && phantom.playerId === excludePlayerId) {
+            continue;
+        }
+
         const replay = await getReplay(seed, phantom.replayId);
         if (replay) {
             replays.push(replay);
@@ -214,6 +227,7 @@ export async function addReplayToRoom(seed: string, replay: ReplayData): Promise
     const newPhantom: PhantomInfo = {
         replayId: replay.id,
         score: replay.finalScore,
+        elo: replay.elo || 1000,
         spawnIndex: replay.startParams.spawnIndex,
         playerId: replay.playerId
     };
@@ -325,10 +339,20 @@ export async function isPlayerActiveInRoom(seed: string, playerId: string): Prom
 
 /**
  * Найти свободную точку спавна.
+ * Если игрок уже имеет фантома в комнате, возвращает его индекс.
  * Если комната содержит старые данные (>3 фантомов), производит очистку.
  */
-export async function assignSpawnIndex(seed: string): Promise<{ spawnIndex: number }> {
+export async function assignSpawnIndex(seed: string, playerId?: string): Promise<{ spawnIndex: number }> {
     const meta = await getRoomMeta(seed);
+
+    // Если игрок уже есть в комнате как активный фантом - даем ему ЕГО же спавн
+    if (playerId) {
+        const existingPhantom = meta.active_phantoms.find(p => p.playerId === playerId);
+        if (existingPhantom) {
+            console.log(`[Room ${seed}] Player ${playerId.substring(0, 8)} already has a phantom. Re-using spawn index ${existingPhantom.spawnIndex}`);
+            return { spawnIndex: existingPhantom.spawnIndex };
+        }
+    }
 
     // Миграция/Очистка: Если фантомов больше, чем MAX_PHANTOMS (3), удаляем лишних
     if (meta.active_phantoms.length > MAX_PHANTOMS) {

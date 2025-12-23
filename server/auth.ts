@@ -11,8 +11,12 @@ export interface UserData {
     createdAt: string;
     lastSeen: string;
     highScore: number;
+    highScoreSeed?: number;
+    highScoreReplayId?: string;
+    highScoreDate?: string;
     gamesPlayed: number;
     totalScore: number;
+    elo: number;
     settings: {
         musicVolume: number;
         sfxVolume: number;
@@ -86,6 +90,7 @@ export class AuthManager {
             highScore: 0,
             gamesPlayed: 0,
             totalScore: 0,
+            elo: 1000,
             settings: {
                 musicVolume: 0.5,
                 sfxVolume: 0.7,
@@ -117,6 +122,11 @@ export class AuthManager {
         try {
             const data = await fs.readFile(filePath, 'utf-8');
             const userData = JSON.parse(data) as UserData;
+
+            // Миграция: добавляем ELO если отсутствует
+            if (userData.elo === undefined) {
+                userData.elo = userData.highScore || 1000;
+            }
 
             // Обновляем lastSeen при каждом обращении
             userData.lastSeen = new Date().toISOString();

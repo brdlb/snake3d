@@ -35,6 +35,7 @@ export interface ReplayData {
     timestamp: number;
     startParams: StartParams;
     finalScore: number;
+    elo?: number;                  // ELO игрока на момент записи
     deathPosition: Vec3;           // Позиция смерти
     trajectoryLog: TrajectoryChange[];  // Лог изменений траектории
 }
@@ -43,6 +44,7 @@ export interface ReplayData {
 export interface PhantomInfo {
     replayId: string;
     score: number;
+    elo: number;        // ELO игрока на момент записи
     spawnIndex: number; // Индекс точки спавна (0-3)
     playerId?: string;   // ID игрока (опционально для обратной совместимости)
 }

@@ -2,6 +2,8 @@
  * WelcomeScreen - Welcome screen for mobile devices
  * Required for audio initialization via user click
  */
+import { networkManager } from '../network/NetworkManager';
+
 export class WelcomeScreen {
     private container: HTMLDivElement;
     private onStart: () => void;
@@ -32,11 +34,17 @@ export class WelcomeScreen {
         title.textContent = 'SNAKE 3D';
         content.appendChild(title);
 
-        // Subtitle
-        const subtitle = document.createElement('p');
-        subtitle.className = 'welcome-subtitle';
-        subtitle.textContent = 'Classic snake in three-dimensional space';
-        content.appendChild(subtitle);
+        // High Score
+        const user = networkManager.getUser();
+        if (user && (user.highScore || 0) > 0) {
+            const scoreDisplay = document.createElement('div');
+            scoreDisplay.className = 'welcome-high-score';
+            scoreDisplay.innerHTML = `
+                <span class="label">YOUR RECORD:</span>
+                <span class="value">${user.highScore}</span>
+            `;
+            content.appendChild(scoreDisplay);
+        }
 
         // Controls section
         const controlsSection = document.createElement('div');

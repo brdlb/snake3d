@@ -39,7 +39,7 @@ export class LeaderboardUI {
 
         const title = document.createElement('h2');
         title.className = 'leaderboard-title';
-        title.textContent = 'TOP PHANTOMS';
+        title.textContent = 'HALL OF FAME';
         header.appendChild(title);
 
 

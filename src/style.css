@@ -487,8 +487,33 @@ body {
   font-family: 'Jura', system-ui, sans-serif;
   font-size: 0.9rem;
   color: #888;
-  margin: 0 0 24px 0;
+  margin: 0 0 16px 0;
   letter-spacing: 1px;
+}
+
+.welcome-high-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 24px;
+  padding: 10px;
+  background: rgba(255, 215, 0, 0.05);
+  border: 1px solid rgba(255, 215, 0, 0.2);
+}
+
+.welcome-high-score .label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #ffd700;
+  letter-spacing: 2px;
+}
+
+.welcome-high-score .value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #fff;
+  font-family: 'Menlo', monospace;
 }
 
 .welcome-controls {

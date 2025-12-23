@@ -35,6 +35,7 @@ export interface ReplayData {
     timestamp: number;
     startParams: StartParams;
     finalScore: number;
+    elo?: number;                  // ELO игрока на момент записи
     deathPosition: Vec3;           // Позиция смерти
     trajectoryLog: TrajectoryChange[];  // Лог изменений траектории
 }

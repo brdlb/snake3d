@@ -1,7 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
-import { AuthManager } from './auth.js';
+import { AuthManager, type UserData } from './auth.js';
 
 import { getRoomData, processGameOver, findRoomForPlayer, logRoomsSummary, getLeaderboard } from './room/RoomService.js';
 import type { GameOverPayload } from './room/types.js';
@@ -142,11 +142,12 @@ io.on('connection', (socket) => {
             if (requestedSeed !== null) {
                 // Игрок запросил конкретную комнату
                 console.log(`[Room] Client ${socket.id} requesting specific room: ${requestedSeed}`);
-                roomData = await getRoomData(requestedSeed);
+                roomData = await getRoomData(requestedSeed, playerId);
             } else {
-                // Автоподбор комнаты по правилу "One Attempt"
+                // Автоподбор комнаты по правилу ELO
                 console.log(`[Room] Client ${socket.id} requesting auto-match room`);
-                roomData = await findRoomForPlayer(playerId);
+                const playerElo = socket.data.user?.elo || 1000;
+                roomData = await findRoomForPlayer(playerId, playerElo);
             }
 
             socket.emit('room:data', roomData);
@@ -165,16 +166,48 @@ io.on('connection', (socket) => {
 
             console.log(`[Game] Client ${socket.id} (${playerName}) finished game. Score: ${payload.replay?.finalScore}`);
 
-            // Добавляем playerName к реплею
+            // Добавляем playerName и elo к реплею
+            const playerElo = socket.data.user?.elo || 1000;
             const payloadWithName = {
                 ...payload,
                 replay: {
                     ...payload.replay,
-                    playerName
+                    playerName,
+                    elo: playerElo
                 }
             };
 
             const result = await processGameOver(playerId, payloadWithName);
+
+            // Обновляем статистику пользователя
+            if (socket.data.token) {
+                const user = await authManager.getUserByToken(socket.data.token);
+                if (user) {
+                    const currentScore = payload.replay?.finalScore || 0;
+                    const updates: Partial<UserData> = {
+                        gamesPlayed: (user.gamesPlayed || 0) + 1,
+                        totalScore: (user.totalScore || 0) + currentScore
+                    };
+
+                    if (currentScore > (user.highScore || 0)) {
+                        updates.highScore = currentScore;
+                        updates.highScoreSeed = payload.seed;
+                        updates.highScoreReplayId = result.replayId;
+                        updates.highScoreDate = new Date().toISOString();
+
+                        // Обновляем ELO: в нашей простой модели ELO = High Score
+                        updates.elo = currentScore;
+
+                        console.log(`[User] New high score and ELO for ${user.username}: ${currentScore}`);
+                    }
+
+                    const updatedUser = await authManager.updateUser(socket.data.token, updates);
+                    if (updatedUser) {
+                        socket.data.user = updatedUser;
+                        socket.emit('user:updated', updatedUser);
+                    }
+                }
+            }
 
             socket.emit('game:result', result);
             console.log(`[Game] Result for ${socket.id}: ${result.message}`);
@@ -187,8 +220,8 @@ io.on('connection', (socket) => {
     // Запрос таблицы рекордов
     socket.on('leaderboard:request', async () => {
         try {
-            // Получаем топ-50
-            const leaderboard = await getLeaderboard(50);
+            // Получаем топ-50 на основе рекордов пользователей
+            const leaderboard = await getLeaderboard(authManager, 50);
             socket.emit('leaderboard:data', leaderboard);
             console.log(`[Leaderboard] Sent top ${leaderboard.length} records to ${socket.id}`);
         } catch (error) {
@@ -202,14 +235,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// Типы данных пользователя
-interface UserData {
-    username: string;
-    createdAt: string;
-    lastSeen: string;
-    highScore?: number;
-    gamesPlayed?: number;
-}
+
 
 const PORT = process.env.PORT || 3055;
 

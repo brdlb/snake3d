@@ -5,8 +5,12 @@ export interface UserData {
     createdAt: string;
     lastSeen: string;
     highScore: number;
+    highScoreSeed?: number;
+    highScoreReplayId?: string;
+    highScoreDate?: string;
     gamesPlayed: number;
     totalScore: number;
+    elo: number;
     settings: {
         musicVolume: number;
         sfxVolume: number;
