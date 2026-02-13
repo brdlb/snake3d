@@ -59,7 +59,7 @@ io.on('connection', (socket) => {
 
         if (token) {
             // Проверяем существующий токен
-            const userData = await authManager.getUserByToken(token);
+            const userData = await authManager.getUserByToken(token, true);
             if (userData) {
                 console.log(`[Auth] User authenticated: ${userData.username}`);
                 socket.data.token = token;
@@ -96,7 +96,7 @@ io.on('connection', (socket) => {
             return;
         }
 
-        const userData = await authManager.getUserByToken(socket.data.token);
+        const userData = await authManager.getUserByToken(socket.data.token, true);
         if (userData) {
             socket.emit('user:data', userData);
         } else {
@@ -181,7 +181,7 @@ io.on('connection', (socket) => {
 
             // Обновляем статистику пользователя
             if (socket.data.token) {
-                const user = await authManager.getUserByToken(socket.data.token);
+                const user = await authManager.getUserByToken(socket.data.token, true);
                 if (user) {
                     const currentScore = payload.replay?.finalScore || 0;
                     const updates: Partial<UserData> = {

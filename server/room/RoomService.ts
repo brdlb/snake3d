@@ -3,6 +3,7 @@
  */
 
 import { getActiveReplays, addReplayToRoom, getAllRoomSeeds, getRoomMeta, hasPlayerPlayedInRoom, assignSpawnIndex, getReplay } from './RoomRepository.js';
+import { RoomValidator } from './RoomValidator.js';
 import type { ReplayData, RoomData, GameOverPayload, LeaderboardEntry } from './types.js';
 import type { AuthManager } from '../auth.js';
 
@@ -119,12 +120,19 @@ export async function processGameOver(playerId: string, payload: GameOverPayload
         playerId,
         playerName: replay.playerName || `Player_${playerId.substring(0, 4)}`,
         timestamp: Date.now(),
-        startParams: replay.startParams,
+        startParams: replay.startParams as any,
         finalScore: replay.finalScore,
         elo: replay.elo, // Передаем ELO если оно есть в пейлоаде
-        deathPosition: replay.deathPosition,
-        trajectoryLog: replay.trajectoryLog
+        deathPosition: replay.deathPosition as any,
+        trajectoryLog: replay.trajectoryLog as any
     };
+
+    // Глубокая валидация реплея
+    const validation = RoomValidator.validate(completeReplay);
+    if (!validation.isValid) {
+        console.warn(`[RoomService] Replay validation failed for user ${playerId}: ${validation.reason}`);
+        return { saved: false, message: `Validation failed: ${validation.reason}` };
+    }
 
     // Пытаемся добавить реплей в комнату
     const saved = await addReplayToRoom(seedStr, completeReplay);

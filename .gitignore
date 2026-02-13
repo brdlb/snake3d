@@ -108,3 +108,4 @@ dist
 # Vite
 dist
 server/dist
+server/data

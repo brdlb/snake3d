@@ -2,6 +2,19 @@ import './style.css';
 import { Game } from './core/Game';
 import { networkManager } from './network';
 
+// Register service worker if supported
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+      })
+      .catch((error) => {
+        console.log('ServiceWorker registration failed: ', error);
+      });
+  });
+}
+
 // Initialize the game when the DOM is ready
 window.addEventListener('DOMContentLoaded', async () => {
     try {

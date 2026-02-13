@@ -117,7 +117,7 @@ export class AuthManager {
     /**
      * Получить данные пользователя по токену
      */
-    async getUserByToken(token: string): Promise<UserData | null> {
+    async getUserByToken(token: string, updateLastSeen: boolean = false): Promise<UserData | null> {
         const filePath = this.getUserFilePath(token);
         try {
             const data = await fs.readFile(filePath, 'utf-8');
@@ -128,9 +128,11 @@ export class AuthManager {
                 userData.elo = userData.highScore || 1000;
             }
 
-            // Обновляем lastSeen при каждом обращении
-            userData.lastSeen = new Date().toISOString();
-            await this.saveUser(token, userData);
+            // Обновляем lastSeen только если это явно запрошено
+            if (updateLastSeen) {
+                userData.lastSeen = new Date().toISOString();
+                await this.saveUser(token, userData);
+            }
 
             return userData;
         } catch (error) {
@@ -148,8 +150,8 @@ export class AuthManager {
             return null;
         }
 
-        // Защищаем некоторые поля от изменения
-        const protectedFields = ['createdAt'];
+        // Защищаем критические поля от прямого изменения клиентом
+        const protectedFields = ['createdAt', 'highScore', 'elo', 'highScoreSeed', 'highScoreReplayId', 'highScoreDate'];
         protectedFields.forEach(field => {
             delete (updates as any)[field];
         });
@@ -196,7 +198,7 @@ export class AuthManager {
             for (const file of files) {
                 if (file.endsWith('.json')) {
                     const token = file.replace('.json', '');
-                    const userData = await this.getUserByToken(token);
+                    const userData = await this.getUserByToken(token, false);
                     if (userData) {
                         users.push({ token, data: userData });
                     }

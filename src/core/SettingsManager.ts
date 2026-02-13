@@ -1,3 +1,5 @@
+import { OfflineDataManager } from '../utils/OfflineDataManager';
+
 export interface CameraConfig {
     fov: number;
     distanceUp: number;
@@ -37,11 +39,29 @@ export class SettingsManager {
         volume: 0.8
     };
 
+    private offlineManager: OfflineDataManager;
+
     constructor() {
+        this.offlineManager = new OfflineDataManager();
         this.load();
     }
 
-    public load() {
+    public async load() {
+        // Сначала загружаем из localStorage для быстрого старта
+        this.loadFromLocalStorage();
+
+        // Затем пытаемся загрузить из IndexedDB для более надежного хранения
+        try {
+            await this.loadFromIndexedDB();
+        } catch (error) {
+            console.warn('[SettingsManager] Failed to load from IndexedDB, using localStorage:', error);
+        }
+    }
+
+    /**
+     * Загрузка настроек из localStorage (синхронно)
+     */
+    private loadFromLocalStorage() {
         const savedCamera = localStorage.getItem('snake3d_camera_config');
         if (savedCamera) {
             try {
@@ -70,9 +90,52 @@ export class SettingsManager {
         }
     }
 
+    /**
+     * Загрузка настроек из IndexedDB (асинхронно)
+     */
+    private async loadFromIndexedDB() {
+        const settings = await this.offlineManager.getGameData('settings');
+        if (settings) {
+            if (settings.cameraConfig) {
+                this.cameraConfig = { ...this.cameraConfig, ...settings.cameraConfig };
+            }
+            if (settings.bloomConfig) {
+                this.bloomConfig = { ...this.bloomConfig, ...settings.bloomConfig };
+            }
+            if (settings.audioConfig) {
+                this.audioConfig = { ...this.audioConfig, ...settings.audioConfig };
+            }
+            console.log('[SettingsManager] Loaded settings from IndexedDB');
+        }
+    }
+
+    /**
+     * Сохранение настроек (синхронно в localStorage, асинхронно в IndexedDB)
+     */
     public save() {
+        // Сохраняем в localStorage синхронно
         localStorage.setItem('snake3d_camera_config', JSON.stringify(this.cameraConfig));
         localStorage.setItem('snake3d_bloom_config', JSON.stringify(this.bloomConfig));
         localStorage.setItem('snake3d_audio_config', JSON.stringify(this.audioConfig));
+
+        // Асинхронно сохраняем в IndexedDB
+        this.saveToIndexedDB();
+    }
+
+    /**
+     * Сохранение настроек в IndexedDB
+     */
+    private async saveToIndexedDB() {
+        try {
+            await this.offlineManager.saveGameData('settings', {
+                cameraConfig: this.cameraConfig,
+                bloomConfig: this.bloomConfig,
+                audioConfig: this.audioConfig,
+                timestamp: Date.now()
+            });
+            console.log('[SettingsManager] Settings saved to IndexedDB');
+        } catch (error) {
+            console.error('[SettingsManager] Failed to save settings to IndexedDB:', error);
+        }
     }
 }

@@ -23,7 +23,7 @@ export interface AuthResult {
     isNew: boolean;
 }
 
-type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'authenticated';
+type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'authenticated' | 'offline';
 
 type EventCallback = (...args: any[]) => void;
 
@@ -36,6 +36,7 @@ export class NetworkManager {
     private eventListeners: Map<string, Set<EventCallback>> = new Map();
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 5;
+    private isOfflineMode: boolean = false;
 
     private readonly TOKEN_KEY = 'snake3d_auth_token';
     private readonly SERVER_URL = this.normalizeUrl(
@@ -49,6 +50,33 @@ export class NetworkManager {
 
     private constructor() {
         this.loadToken();
+        this.setupNetworkListeners();
+    }
+
+    /**
+     * Настройка слушателей состояния сети
+     */
+    private setupNetworkListeners(): void {
+        // Слушаем изменения состояния сети
+        window.addEventListener('online', () => {
+            console.log('[Network] Connection restored');
+            this.isOfflineMode = false;
+            this.emit('networkOnline');
+        });
+
+        window.addEventListener('offline', () => {
+            console.log('[Network] Connection lost - entering offline mode');
+            this.isOfflineMode = true;
+            this.connectionState = 'offline';
+            this.emit('networkOffline');
+            this.emit('connectionStateChange', this.connectionState);
+        });
+
+        // Проверяем начальное состояние
+        if (!navigator.onLine) {
+            this.isOfflineMode = true;
+            this.connectionState = 'offline';
+        }
     }
 
     /**
@@ -107,6 +135,15 @@ export class NetworkManager {
      */
     public connect(): Promise<AuthResult> {
         return new Promise((resolve, reject) => {
+            // Проверяем, находимся ли мы в оффлайн режиме
+            if (this.isOfflineMode || !navigator.onLine) {
+                console.log('[Network] Offline mode - skipping connection');
+                this.connectionState = 'offline';
+                this.emit('connectionStateChange', this.connectionState);
+                reject(new Error('Offline mode - no network connection'));
+                return;
+            }
+
             if (this.socket?.connected) {
                 console.log('[Network] Already connected');
                 if (this.user && this.token) {
@@ -333,6 +370,39 @@ export class NetworkManager {
 
     public getSocket(): Socket | null {
         return this.socket;
+    }
+
+    /**
+     * Проверить, находимся ли мы в оффлайн режиме
+     */
+    public isOffline(): boolean {
+        return this.isOfflineMode || !navigator.onLine;
+    }
+
+    /**
+     * Получить сохранённые данные пользователя из localStorage (для оффлайн режима)
+     */
+    public getOfflineUserData(): UserData | null {
+        try {
+            const stored = localStorage.getItem('snake3d_offline_user');
+            if (stored) {
+                return JSON.parse(stored);
+            }
+        } catch (error) {
+            console.warn('[Network] Failed to load offline user data:', error);
+        }
+        return null;
+    }
+
+    /**
+     * Сохранить данные пользователя для оффлайн режима
+     */
+    public saveOfflineUserData(user: UserData): void {
+        try {
+            localStorage.setItem('snake3d_offline_user', JSON.stringify(user));
+        } catch (error) {
+            console.warn('[Network] Failed to save offline user data:', error);
+        }
     }
 }
 

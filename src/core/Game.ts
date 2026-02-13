@@ -31,6 +31,7 @@ interface Pulse {
 }
 
 import { Pathfinder } from './Pathfinder';
+import { OfflineDataManager } from '../utils/OfflineDataManager';
 
 export class Game {
     private settingsManager: SettingsManager;
@@ -45,6 +46,7 @@ export class Game {
     private leaderboardUI: LeaderboardUI;
     private soundManager: SoundManager;
     private pathfinder: Pathfinder;
+    private offlineManager: OfflineDataManager;
 
     private loop: Loop;
     private input: InputManager;
@@ -248,6 +250,10 @@ export class Game {
         // Network Manager
         this.networkManager = NetworkManager.getInstance();
 
+        // Offline Data Manager - для работы в оффлайн режиме
+        this.offlineManager = new OfflineDataManager();
+        this.offlineManager.setupOnlineHandler(this.networkManager);
+
         // Network Status UI removed in favor of Pause Button
         // this.networkStatusUI = new NetworkStatusUI();
 
@@ -255,6 +261,8 @@ export class Game {
         this.networkManager.on('room:data', (data: RoomData) => {
             console.log(`[Game] Received room data: seed=${data.seed}, phantoms=${data.phantoms.length}`);
             this.initializeRoom(data);
+            // Кэшируем фантомов для оффлайн режима
+            this.cachePhantomsForOffline(data.phantoms);
         });
 
         this.networkManager.on('game:result', (result: { saved: boolean; message: string }) => {
@@ -391,16 +399,76 @@ export class Game {
         if (this.networkManager.isConnected()) {
             this.networkManager.send('room:join', null);
         } else {
-            // Оффлайн режим — генерируем локальный seed и случайный spawnIndex
-            const localSeed = Math.floor(Math.random() * 1000000);
-            const localSpawnIndex = getRandomSpawnIndex();
-            this.initializeRoom({ seed: localSeed, phantoms: [], playerSpawnIndex: localSpawnIndex });
+            // Оффлайн режим — загружаем кэшированные фантомы или генерируем локально
+            await this.initializeOfflineRoom();
         }
 
         // Снимаем флаг ожидания старта
         this.isWaitingForStart = false;
 
         console.log('Game started!');
+    }
+
+    /**
+     * Инициализация комнаты в оффлайн режиме с кэшированными фантомами
+     */
+    private async initializeOfflineRoom(): Promise<void> {
+        const localSeed = Math.floor(Math.random() * 1000000);
+        const localSpawnIndex = getRandomSpawnIndex();
+
+        try {
+            // Пытаемся загрузить кэшированные фантомы
+            const cachedPhantoms = await this.loadCachedPhantoms();
+            
+            this.initializeRoom({ 
+                seed: localSeed, 
+                phantoms: cachedPhantoms, 
+                playerSpawnIndex: localSpawnIndex 
+            });
+
+            console.log(`[Game] Offline room initialized with ${cachedPhantoms.length} cached phantoms`);
+        } catch (error) {
+            console.warn('[Game] Failed to load cached phantoms, starting with empty room:', error);
+            this.initializeRoom({ seed: localSeed, phantoms: [], playerSpawnIndex: localSpawnIndex });
+        }
+    }
+
+    /**
+     * Загрузка кэшированных фантомов из IndexedDB
+     */
+    private async loadCachedPhantoms(): Promise<any[]> {
+        try {
+            const cachedData = await this.offlineManager.getGameData('cachedPhantoms');
+            if (cachedData && cachedData.phantoms && Array.isArray(cachedData.phantoms)) {
+                // Проверяем, не устарели ли данные (кэш на 24 часа)
+                const cacheAge = Date.now() - (cachedData.timestamp || 0);
+                const MAX_CACHE_AGE = 24 * 60 * 60 * 1000; // 24 часа
+                
+                if (cacheAge < MAX_CACHE_AGE) {
+                    return cachedData.phantoms;
+                } else {
+                    console.log('[Game] Cached phantoms are too old, will use empty room');
+                }
+            }
+        } catch (error) {
+            console.error('[Game] Error loading cached phantoms:', error);
+        }
+        return [];
+    }
+
+    /**
+     * Кэширование фантомов для использования в оффлайн режиме
+     */
+    private async cachePhantomsForOffline(phantoms: any[]): Promise<void> {
+        try {
+            await this.offlineManager.saveGameData('cachedPhantoms', {
+                phantoms: phantoms,
+                timestamp: Date.now()
+            });
+            console.log(`[Game] Cached ${phantoms.length} phantoms for offline play`);
+        } catch (error) {
+            console.error('[Game] Failed to cache phantoms:', error);
+        }
     }
 
     private onWindowResize() {
@@ -800,7 +868,7 @@ export class Game {
         }
     }
 
-    private handleGameOver() {
+    private async handleGameOver() {
         this.isGameOver = true;
         this.cameraController.triggerShake(0.2, 0.2);
         this.cameraController.setOrbitMode(); // Replaces setGameOverMode
@@ -825,11 +893,49 @@ export class Game {
                     replay: replayData
                 });
                 console.log(`[Game] Sent replay to server. Score: ${this.score}, Changes: ${this.replayRecorder.getChangeCount()}`);
+            } else {
+                // Оффлайн режим — сохраняем результат локально
+                await this.saveOfflineGameResult(replayData);
             }
         }
     }
 
-    private resetGame() {
+    /**
+     * Сохранение результата игры в оффлайн режиме
+     */
+    private async saveOfflineGameResult(replayData: any): Promise<void> {
+        try {
+            // Сохраняем результат игры
+            await this.offlineManager.saveGameData('lastGameResult', {
+                score: this.score,
+                seed: this.currentSeed,
+                replay: replayData,
+                timestamp: Date.now(),
+                playerName: this.playerName
+            });
+
+            // Проверяем, нужно ли обновить рекорд
+            const highScoreData = await this.offlineManager.getGameData('highScore');
+            const currentHighScore = highScoreData?.highScore || 0;
+            
+            if (this.score > currentHighScore) {
+                await this.offlineManager.saveGameData('highScore', {
+                    highScore: this.score,
+                    highScoreSeed: this.currentSeed,
+                    highScoreReplayId: replayData.id,
+                    highScoreDate: new Date().toISOString(),
+                    replay: replayData
+                });
+                console.log(`[Game] New offline high score saved: ${this.score}`);
+            }
+
+            console.log(`[Game] Game result saved offline. Score: ${this.score}`);
+        } catch (error) {
+            console.error('[Game] Failed to save offline game result:', error);
+        }
+    }
+
+    private async resetGame() {
         this.gameOverUI.hide();
         this.pauseUI.hide();
         this.isGameOver = false;
@@ -865,10 +971,8 @@ export class Game {
         if (this.networkManager.isConnected()) {
             this.networkManager.send('room:join', null);
         } else {
-            // Offline mode - generate new local seed and random spawn
-            const localSeed = Math.floor(Math.random() * 1000000);
-            const localSpawnIndex = getRandomSpawnIndex();
-            this.initializeRoom({ seed: localSeed, phantoms: [], playerSpawnIndex: localSpawnIndex });
+            // Offline mode - use cached phantoms or empty room
+            await this.initializeOfflineRoom();
         }
     }
 
