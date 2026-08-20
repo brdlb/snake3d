@@ -34,6 +34,8 @@ export function replayReplacementOrder(replaySaved: boolean, evictRoomReplay: bo
   return [...(evictRoomReplay ? ['deleteRoomMinimum'] : []), 'deletePlayerReplay', 'insertReplay'] as const;
 }
 
+export const ROOM_REPLAYS_QUERY = 'SELECT payload_json FROM replays WHERE room_seed=? ORDER BY score DESC, created_at ASC LIMIT 3';
+
 export default { async fetch(request, env): Promise<Response> { const requestId=crypto.randomUUID(), url=new URL(request.url), path=url.pathname;
   if (!path.startsWith('/api/')) { const response=await env.ASSETS.fetch(request), headers=new Headers(response.headers); headers.set('x-content-type-options','nosniff'); headers.set('referrer-policy','same-origin'); headers.set('permissions-policy','camera=(), microphone=(), geolocation=()'); return new Response(response.body,{status:response.status,headers}); }
   if (request.method !== 'GET' && !mutationAllowed(request)) return fail('INVALID_ORIGIN',403,requestId);
@@ -55,8 +57,8 @@ export class RoomDurableObject {
     for(let attempt=0;attempt<8;attempt++) { const seed=randomSeed(), result=await this.env.DB.prepare('INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)').bind(seed,Math.floor(user.elo/100),now()).run(); if(result.meta.changes===1)return seed; }
     throw new Error('ROOM_SEED_COLLISION');
   }
-  private async activeReplays(seed:number,userId:string) { return this.env.DB.prepare('SELECT payload_json FROM replays WHERE room_seed=? AND user_id<>? ORDER BY score DESC, created_at ASC LIMIT 3').bind(seed,userId).all<{payload_json:string}>(); }
-  private async roomData(seed:number,user:User):Promise<RoomData> { const replays=await this.activeReplays(seed,user.id); const assignment=await this.env.DB.prepare('SELECT spawn_index FROM room_assignments WHERE user_id=? AND room_seed=?').bind(user.id,seed).first<{spawn_index:number}>(); return {seed,phantoms:replays.results.map(r=>JSON.parse(r.payload_json)),playerSpawnIndex:assignment?.spawn_index??0}; }
+  private async activeReplays(seed:number) { return this.env.DB.prepare(ROOM_REPLAYS_QUERY).bind(seed).all<{payload_json:string}>(); }
+  private async roomData(seed:number,user:User):Promise<RoomData> { const replays=await this.activeReplays(seed); const assignment=await this.env.DB.prepare('SELECT spawn_index FROM room_assignments WHERE user_id=? AND room_seed=?').bind(user.id,seed).first<{spawn_index:number}>(); return {seed,phantoms:replays.results.map(r=>JSON.parse(r.payload_json)),playerSpawnIndex:assignment?.spawn_index??0}; }
   private async assign({action,contextSeed,user}:{action:RoomAction;contextSeed?:number;user:User}) {
     const current=await this.env.DB.prepare('SELECT room_seed,spawn_index FROM room_assignments WHERE user_id=?').bind(user.id).first<{room_seed:number;spawn_index:number}>();
     if((action==='restart'||action==='next')&&(!current||contextSeed!==current.room_seed))return json({error:{code:'ROOM_CONTEXT_MISMATCH'}},409);
@@ -67,7 +69,7 @@ export class RoomDurableObject {
       const candidates=await this.env.DB.prepare(`SELECT r.seed AS seed, COALESCE(AVG(CAST(json_extract(p.payload_json,'$.elo') AS REAL)),1000) AS average_elo, COUNT(p.id) AS phantom_count FROM rooms r LEFT JOIN replays p ON p.room_seed=r.seed WHERE NOT EXISTS (SELECT 1 FROM user_room_visits v WHERE v.user_id=? AND v.room_seed=r.seed) GROUP BY r.seed`).bind(user.id).all<{seed:number;average_elo:number;phantom_count:number}>();
       seed=rankNextRooms(candidates.results.map(row=>({seed:Number(row.seed),averageElo:Number(row.average_elo),phantomCount:Number(row.phantom_count)})),user.elo)[0]?.seed??await this.createRoom(user);
     }
-    const existing=await this.activeReplays(seed,user.id);
+    const existing=await this.activeReplays(seed);
     const spawn=chooseSpawn(existing.results.map(row=>JSON.parse(row.payload_json)),action==='restart' ? current!.spawn_index : undefined);
     const time=now();
     await this.env.DB.batch([

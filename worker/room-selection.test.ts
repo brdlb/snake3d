@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { chooseSpawn, rankNextRooms, replayReplacementOrder } from './index';
+import { chooseSpawn, rankNextRooms, replayReplacementOrder, ROOM_REPLAYS_QUERY } from './index';
 
 describe('room selection rules', () => {
   it('prefers ELO distance, then occupied phantom count', () => {
@@ -41,5 +41,10 @@ describe('room selection rules', () => {
   it('deletes a player replay before inserting its replacement', () => {
     expect(replayReplacementOrder(true, false)).toEqual(['deletePlayerReplay', 'insertReplay']);
     expect(replayReplacementOrder(true, true)).toEqual(['deleteRoomMinimum', 'deletePlayerReplay', 'insertReplay']);
+  });
+
+  it('returns every saved room replay, including the restarting player replay', () => {
+    expect(ROOM_REPLAYS_QUERY).toContain('WHERE room_seed=?');
+    expect(ROOM_REPLAYS_QUERY).not.toContain('user_id<>');
   });
 });
