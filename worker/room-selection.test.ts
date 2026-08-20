@@ -30,4 +30,11 @@ describe('room selection rules', () => {
       { elo: 900, startParams: { spawnIndex: 3 } },
     ])).toBe(1);
   });
+
+  it('moves restart to another free spawn when one exists', () => {
+    expect(chooseSpawn([
+      { elo: 1000, startParams: { spawnIndex: 2 } },
+      { elo: 1000, startParams: { spawnIndex: 3 } },
+    ], 0)).toBe(1);
+  });
 });

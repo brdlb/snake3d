@@ -523,6 +523,7 @@ export class Game {
 
     private update(delta: number) {
         this.time += delta;
+        if (!this.input.isActionPressed('boost')) this.restartKeyWasPressed = false;
 
         // Если ожидаем нажатия кнопки "Старт" — только рендерим сцену
         if (this.isWaitingForStart) {
@@ -538,8 +539,10 @@ export class Game {
             this.cameraController.update(delta, head, this.snake.direction, 0);
             this.particleSystem.update(delta);
 
-            // Allow manual restart via input as fallback
-            if (this.input.isActionPressed('boost')) {
+            // Consume Space: holding it must not start one restart per frame.
+            const restartPressed = this.input.isActionPressed('boost');
+            if (restartPressed && !this.restartKeyWasPressed) {
+                this.restartKeyWasPressed = true;
                 void this.resetGame('restart');
             }
             return;
@@ -943,8 +946,12 @@ export class Game {
     private gameSavePromise: Promise<unknown> | null = null;
     private pendingGameSubmission: any = null;
     private gameSaveFailed: boolean = false;
+    private isRoomTransitionPending: boolean = false;
+    private restartKeyWasPressed: boolean = false;
 
     private async resetGame(action: 'restart' | 'next') {
+        if (this.isRoomTransitionPending) return;
+        this.isRoomTransitionPending = true;
         this.gameOverUI.setLoading(true);
         try {
             if (this.gameSaveFailed && this.pendingGameSubmission) {
@@ -999,6 +1006,8 @@ export class Game {
         this.pendingGameSubmission = null;
         } catch (error) {
             this.gameOverUI.setLoading(false, error instanceof Error ? error.message : 'Could not start a new room. Try again.');
+        } finally {
+            this.isRoomTransitionPending = false;
         }
     }
 
