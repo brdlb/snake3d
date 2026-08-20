@@ -19,7 +19,7 @@ import { LeaderboardUI } from '../ui/LeaderboardUI';
 import { SoundManager } from '../audio/SoundManager';
 import { ReplayRecorder } from './ReplaySystem';
 import { NetworkManager } from '../network/NetworkManager';
-// import { NetworkStatusUI } from '../network/NetworkStatusUI';
+import { NetworkStatusUI } from '../network/NetworkStatusUI';
 import { PauseUI, GameStats } from '../ui/PauseUI';
 import type { ReplayData, RoomData } from '../types/replay';
 
@@ -81,7 +81,6 @@ export class Game {
     private phantomMesh: THREE.InstancedMesh | null = null;
     private replayRecorder: ReplayRecorder | null = null;
     private networkManager: NetworkManager;
-    // private networkStatusUI: NetworkStatusUI;
     private currentSeed: number = 0;
 
     // Pause & Stats
@@ -255,8 +254,7 @@ export class Game {
         this.offlineManager = new OfflineDataManager();
         this.offlineManager.setupOnlineHandler(this.networkManager);
 
-        // Network Status UI removed in favor of Pause Button
-        // this.networkStatusUI = new NetworkStatusUI();
+        new NetworkStatusUI();
 
         // Listen for room data (phantoms)
         this.networkManager.on('game:result', (result: { saved: boolean; message: string }) => {

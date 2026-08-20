@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { chooseSpawn, rankNextRooms } from './index';
+import { chooseSpawn, rankNextRooms, replayReplacementOrder } from './index';
 
 describe('room selection rules', () => {
   it('prefers ELO distance, then occupied phantom count', () => {
@@ -36,5 +36,10 @@ describe('room selection rules', () => {
       { elo: 1000, startParams: { spawnIndex: 2 } },
       { elo: 1000, startParams: { spawnIndex: 3 } },
     ], 0)).toBe(1);
+  });
+
+  it('deletes a player replay before inserting its replacement', () => {
+    expect(replayReplacementOrder(true, false)).toEqual(['deletePlayerReplay', 'insertReplay']);
+    expect(replayReplacementOrder(true, true)).toEqual(['deleteRoomMinimum', 'deletePlayerReplay', 'insertReplay']);
   });
 });

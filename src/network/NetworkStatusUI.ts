@@ -1,32 +1,25 @@
 import { networkManager } from './NetworkManager';
 
-/**
- * UI для отображения информации о текущей комнате
- */
+/** Small, unobtrusive indicator of whether the game can use the online API. */
 export class NetworkStatusUI {
     private container: HTMLElement;
-    private seedText: HTMLElement;
     private statusDot: HTMLElement;
 
     constructor() {
         this.container = document.createElement('div');
         this.container.id = 'network-status';
         this.container.innerHTML = `
-            <div class="room-info">
-                <span class="status-dot"></span>
-                <span class="seed-label">Room:</span>
-                <span class="seed-text">---</span>
-            </div>
+            <span class="status-dot" aria-hidden="true"></span>
         `;
 
         this.applyStyles();
 
         this.statusDot = this.container.querySelector('.status-dot')!;
-        this.seedText = this.container.querySelector('.seed-text')!;
 
         document.body.appendChild(this.container);
 
         this.setupEventListeners();
+        this.updateConnectionStatus(networkManager.isConnected());
     }
 
     private applyStyles(): void {
@@ -36,21 +29,16 @@ export class NetworkStatusUI {
                 position: fixed;
                 top: 10px;
                 right: 10px;
-                background: rgba(30, 30, 30, 0.85);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 8px;
-                padding: 8px 14px;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 13px;
-                color: #fff;
-                z-index: 10000;
-                backdrop-filter: blur(10px);
-            }
-
-            .room-info {
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                justify-content: center;
+                width: 20px;
+                height: 20px;
+                background: rgba(12, 18, 28, 0.72);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 50%;
+                z-index: 10000;
+                backdrop-filter: blur(10px);
             }
 
             .status-dot {
@@ -68,16 +56,6 @@ export class NetworkStatusUI {
             .status-dot.offline {
                 background: #ef4444;
             }
-
-            .seed-label {
-                color: #888;
-            }
-
-            .seed-text {
-                color: #88ffff;
-                font-weight: bold;
-                letter-spacing: 1px;
-            }
         `;
         document.head.appendChild(style);
     }
@@ -90,13 +68,8 @@ export class NetworkStatusUI {
 
     private updateConnectionStatus(isOnline: boolean): void {
         this.statusDot.className = 'status-dot ' + (isOnline ? 'online' : 'offline');
-    }
-
-    /**
-     * Обновить отображаемый seed комнаты
-     */
-    public setSeed(seed: number): void {
-        this.seedText.textContent = seed.toString();
+        this.container.title = isOnline ? 'Online' : 'Offline';
+        this.container.setAttribute('aria-label', isOnline ? 'Online' : 'Offline');
     }
 
     public hide(): void {
