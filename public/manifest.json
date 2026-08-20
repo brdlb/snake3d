@@ -1,31 +1,31 @@
 {
-  "name": "3D Snake Game",
+  "name": "Snake 3D — змейка в новом измерении",
   "short_name": "3D Snake",
-  "description": "Игра змейка в трехмерном пространстве с захватывающими эффектами и мультиплеером",
+  "description": "Динамичная 3D-змейка с рекордами, эффектами и сетевыми заездами.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
-  "theme_color": "#4a90e2",
+  "theme_color": "#07131f",
   "orientation": "landscape",
   "icons": [
     {
       "src": "sp.png",
-      "sizes": "192x192",
+      "sizes": "100x100",
       "type": "image/png"
     },
     {
       "src": "blue.png",
-      "sizes": "512x512",
+      "sizes": "100x100",
       "type": "image/png"
     },
     {
       "src": "pause.png",
-      "sizes": "192x192",
+      "sizes": "331x51",
       "type": "image/png"
     },
     {
       "src": "scr.png",
-      "sizes": "1024x1024",
+      "sizes": "600x377",
       "type": "image/png"
     }
   ]

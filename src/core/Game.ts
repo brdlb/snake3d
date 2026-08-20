@@ -146,7 +146,8 @@ export class Game {
         this.leaderboardUI = new LeaderboardUI(this.playerName);
 
         this.gameOverUI = new GameOverUI(
-            () => this.resetGame(),
+            () => { void this.resetGame('restart'); },
+            () => { void this.resetGame('next'); },
             () => this.leaderboardUI.show()
         );
         this.hud = new GameHUD();
@@ -258,15 +259,9 @@ export class Game {
         // this.networkStatusUI = new NetworkStatusUI();
 
         // Listen for room data (phantoms)
-        this.networkManager.on('room:data', (data: RoomData) => {
-            console.log(`[Game] Received room data: seed=${data.seed}, phantoms=${data.phantoms.length}`);
-            this.initializeRoom(data);
-            // Кэшируем фантомов для оффлайн режима
-            this.cachePhantomsForOffline(data.phantoms);
-        });
-
         this.networkManager.on('game:result', (result: { saved: boolean; message: string }) => {
             console.log(`[Game] Game result: ${result.message}`);
+            if (result.saved) this.gameOverUI.setLoading(false);
         });
 
         // Check if already authenticated (initialized in main.ts)
@@ -397,7 +392,9 @@ export class Game {
 
         // Запрашиваем комнату с сервера (null = случайный seed)
         if (this.networkManager.isConnected()) {
-            this.networkManager.send('room:join', null);
+            const room = await this.networkManager.requestRoom('initial');
+            this.initializeRoom(room);
+            this.cachePhantomsForOffline(room.phantoms);
         } else {
             // Оффлайн режим — загружаем кэшированные фантомы или генерируем локально
             await this.initializeOfflineRoom();
@@ -543,7 +540,7 @@ export class Game {
 
             // Allow manual restart via input as fallback
             if (this.input.isActionPressed('boost')) {
-                this.resetGame();
+                void this.resetGame('restart');
             }
             return;
         }
@@ -888,14 +885,22 @@ export class Game {
             const replayData = this.replayRecorder.getReplayData(this.score, deathPosition, this.playerName);
 
             if (this.networkManager.isConnected()) {
-                this.networkManager.send('game:over', {
+                this.gameOverUI.setLoading(true);
+                this.pendingGameSubmission = {
                     seed: this.currentSeed,
-                    replay: replayData
+                    replay: replayData,
+                    submissionId: crypto.randomUUID()
+                };
+                this.gameSavePromise = this.networkManager.submitGame(this.pendingGameSubmission);
+                this.gameSavePromise.catch(error => {
+                    this.gameSaveFailed = true;
+                    this.gameOverUI.setLoading(false, error instanceof Error ? error.message : 'Could not save the result. Try again.');
                 });
                 console.log(`[Game] Sent replay to server. Score: ${this.score}, Changes: ${this.replayRecorder.getChangeCount()}`);
             } else {
                 // Оффлайн режим — сохраняем результат локально
                 await this.saveOfflineGameResult(replayData);
+                this.gameSavePromise = null;
             }
         }
     }
@@ -935,8 +940,22 @@ export class Game {
         }
     }
 
-    private async resetGame() {
-        this.gameOverUI.hide();
+    private gameSavePromise: Promise<unknown> | null = null;
+    private pendingGameSubmission: any = null;
+    private gameSaveFailed: boolean = false;
+
+    private async resetGame(action: 'restart' | 'next') {
+        this.gameOverUI.setLoading(true);
+        try {
+            if (this.gameSaveFailed && this.pendingGameSubmission) {
+                this.gameSaveFailed = false;
+                this.gameSavePromise = this.networkManager.submitGame(this.pendingGameSubmission);
+            }
+            await this.gameSavePromise;
+            const room = this.networkManager.isConnected()
+                ? await this.networkManager.requestRoom(action, this.currentSeed)
+                : null;
+            this.gameOverUI.hide();
         this.pauseUI.hide();
         this.isGameOver = false;
         this.isPaused = false;
@@ -967,12 +986,19 @@ export class Game {
         // Reset phantoms
         this.phantoms = [];
 
-        // Request new room from server (initializeRoom will reset snake position)
-        if (this.networkManager.isConnected()) {
-            this.networkManager.send('room:join', null);
+        // The assignment has completed before this screen is closed, so an API
+        // error leaves the player on Game Over with a retryable action.
+        if (room) {
+            this.initializeRoom(room);
+            this.cachePhantomsForOffline(room.phantoms);
         } else {
             // Offline mode - use cached phantoms or empty room
             await this.initializeOfflineRoom();
+        }
+        this.gameSavePromise = null;
+        this.pendingGameSubmission = null;
+        } catch (error) {
+            this.gameOverUI.setLoading(false, error instanceof Error ? error.message : 'Could not start a new room. Try again.');
         }
     }
 

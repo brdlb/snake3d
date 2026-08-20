@@ -17,8 +17,13 @@ if ('serviceWorker' in navigator) {
 
 // Initialize the game when the DOM is ready
 window.addEventListener('DOMContentLoaded', async () => {
+    // Authentication must never keep the game on its loading screen indefinitely.
+    const connect = networkManager.connect();
     try {
-        const authResult = await networkManager.connect();
+        const authResult = await Promise.race([
+            connect,
+            new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error('Session timeout')), 2500)),
+        ]);
         console.log(
             `[Main] Connected as ${authResult.user.username}`,
             authResult.isNew ? '(new player)' : '(returning player)'

@@ -3,6 +3,8 @@ import { GameStats } from './PauseUI';
 export class GameOverUI {
     private container!: HTMLElement;
     private restartBtn!: HTMLButtonElement;
+    private nextBtn!: HTMLButtonElement;
+    private errorEl!: HTMLElement;
 
     // Stats Elements
     // Stats Elements
@@ -17,10 +19,12 @@ export class GameOverUI {
     private foodPinkEl!: HTMLElement;
 
     private onRestart: () => void;
+    private onNext: () => void;
     private onLeaderboard: () => void;
 
-    constructor(onRestart: () => void, onLeaderboard: () => void) {
+    constructor(onRestart: () => void, onNext: () => void, onLeaderboard: () => void) {
         this.onRestart = onRestart;
+        this.onNext = onNext;
         this.onLeaderboard = onLeaderboard;
         this.createUI();
     }
@@ -41,6 +45,12 @@ export class GameOverUI {
             if (this.container.classList.contains('active')) {
                 this.onRestart();
             }
+        });
+        this.nextBtn = document.createElement('button');
+        this.nextBtn.className = 'restart-btn next-btn';
+        this.nextBtn.textContent = 'NEXT';
+        this.nextBtn.addEventListener('click', () => {
+            if (this.container.classList.contains('active')) this.onNext();
         });
 
         // Wrapper for the sliding effect (Title)
@@ -103,9 +113,17 @@ export class GameOverUI {
 
         this.container.appendChild(leadersBtn);
 
+        this.nextBtn.style.transitionDelay = '0.3s';
+        this.container.appendChild(this.nextBtn);
+
         // Update restart button delay to come after leaderboard
-        this.restartBtn.style.transitionDelay = '0.3s';
+        this.restartBtn.style.transitionDelay = '0.4s';
         this.container.appendChild(this.restartBtn);
+
+        this.errorEl = document.createElement('p');
+        this.errorEl.className = 'game-over-error';
+        this.errorEl.hidden = true;
+        this.container.appendChild(this.errorEl);
 
         document.body.appendChild(this.container);
 
@@ -197,6 +215,7 @@ export class GameOverUI {
             .leaders-btn:hover {
                 background: #1a1a1a;
             }
+            .game-over-error { color: #ff7575; font-family: 'Jura', sans-serif; font-weight: 700; }
         `;
         document.head.appendChild(style);
     }
@@ -224,12 +243,20 @@ export class GameOverUI {
         this.container.classList.add('active');
     }
 
+    public setLoading(loading: boolean, error?: string) {
+        this.restartBtn.disabled = loading;
+        this.nextBtn.disabled = loading;
+        this.restartBtn.textContent = loading ? 'SAVING…' : 'RESTART';
+        this.nextBtn.textContent = loading ? 'PLEASE WAIT…' : 'NEXT';
+        this.errorEl.hidden = !error;
+        this.errorEl.textContent = error ?? '';
+    }
+
     public hide() {
         this.container.classList.remove('active');
     }
 
     public dispose() {
-        this.restartBtn.removeEventListener('click', this.onRestart);
         this.container.remove();
     }
 }

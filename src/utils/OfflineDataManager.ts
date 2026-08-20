@@ -20,6 +20,7 @@ export class OfflineDataManager {
   private dbName = 'Snake3DGameDB';
   private version = 1;
   private db: IDBDatabase | null = null;
+  private readonly ready: Promise<void>;
   
   // Имя хранилища данных
   private readonly STORES = {
@@ -28,7 +29,7 @@ export class OfflineDataManager {
   };
   
   constructor() {
-    this.initDB();
+    this.ready = this.initDB();
   }
   
   /**
@@ -70,6 +71,7 @@ export class OfflineDataManager {
    * Сохранение данных игры в IndexedDB
    */
   async saveGameData(key: string, data: GameData): Promise<void> {
+    await this.ready;
     if (!this.db) {
       throw new Error('База данных не инициализирована');
     }
@@ -98,6 +100,7 @@ export class OfflineDataManager {
    * Получение данных игры из IndexedDB
    */
   async getGameData(key: string): Promise<GameData | null> {
+    await this.ready;
     if (!this.db) {
       throw new Error('База данных не инициализирована');
     }
@@ -122,6 +125,7 @@ export class OfflineDataManager {
    * Удаление данных игры из IndexedDB
    */
   async deleteGameData(key: string): Promise<void> {
+    await this.ready;
     if (!this.db) {
       throw new Error('База данных не инициализирована');
     }
@@ -149,6 +153,7 @@ export class OfflineDataManager {
    * Добавление операции в очередь синхронизации
    */
   private async addToSyncQueue(id: string, operation: 'save' | 'update' | 'delete', data: any): Promise<void> {
+    await this.ready;
     if (!this.db) {
       throw new Error('База данных не инициализирована');
     }
@@ -176,6 +181,7 @@ export class OfflineDataManager {
    * Получение всех операций синхронизации из очереди
    */
   private async getPendingSyncOperations(): Promise<PendingSyncOperation[]> {
+    await this.ready;
     if (!this.db) {
       throw new Error('База данных не инициализирована');
     }
@@ -202,6 +208,7 @@ export class OfflineDataManager {
    * Удаление операции из очереди синхронизации
    */
   private async removeSyncOperation(id: string): Promise<void> {
+    await this.ready;
     if (!this.db) {
       throw new Error('База данных не инициализирована');
     }
@@ -293,6 +300,7 @@ export class OfflineDataManager {
    * Очистка всех данных в IndexedDB
    */
   async clearAllData(): Promise<void> {
+    await this.ready;
     if (!this.db) {
       throw new Error('База данных не инициализирована');
     }

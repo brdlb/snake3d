@@ -1,4 +1,4 @@
-const CACHE_NAME = 'snake3d-v1';
+const CACHE_NAME = 'snake3d-v4';
 const STATIC_CACHE = [
   '/',
   '/index.html',
@@ -14,27 +14,22 @@ const STATIC_CACHE = [
   '/blue.png',
   '/pause.png',
   '/scr.png',
+  '/social-preview.png',
   '/sp.png',
   // Manifest
   '/manifest.json',
   // Audio files
   '/gameover.mp3',
-  '/gameover.wav',
   '/gameover.mp4',
   '/hum1.mp3',
-  '/hum1.wav',
   '/hum1.mp4',
   '/hum2.mp3',
-  '/hum2.wav',
   '/hum2.mp4',
   '/hum3.mp3',
-  '/hum3.wav',
   '/hum3.mp4',
   '/pick.mp3',
-  '/pick.wav',
   '/pick.mp4',
   '/step.mp3',
-  '/step.wav',
   '/step.mp4'
 ];
 
@@ -48,7 +43,6 @@ const DYNAMIC_CACHE_PATTERNS = [
   /\.jpg$/,
   /\.svg$/,
   /\.mp3$/,
-  /\.wav$/,
   /\.mp4$/
 ];
 
@@ -105,8 +99,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Check if the request is for a static asset we want to cache
   const url = new URL(event.request.url);
+  // Account state and room upgrades are always live and must never be cached.
+  if (url.pathname.startsWith('/api/') || event.request.headers.get('upgrade') === 'websocket') {
+    return;
+  }
+
+  // Check if the request is for a static asset we want to cache
   const isStaticAsset = STATIC_CACHE.some(path => 
     url.pathname === path || url.pathname === path.slice(1)
   );
