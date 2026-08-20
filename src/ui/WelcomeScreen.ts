@@ -6,10 +6,13 @@ import { networkManager } from '../network/NetworkManager';
 
 export class WelcomeScreen {
     private container: HTMLDivElement;
-    private onStart: () => void;
+    private onStart: (mode: 'player' | 'spectator') => void;
+    private readonly invitedRoomSeed: number | null;
 
-    constructor(onStart: () => void) {
+    constructor(onStart: (mode: 'player' | 'spectator') => void) {
         this.onStart = onStart;
+        const room = new URLSearchParams(window.location.search).get('room');
+        this.invitedRoomSeed = room !== null && /^\d+$/.test(room) && Number.isSafeInteger(Number(room)) ? Number(room) : null;
         this.container = this.createUI();
         document.body.appendChild(this.container);
     }
@@ -33,6 +36,29 @@ export class WelcomeScreen {
         title.className = 'welcome-title';
         title.textContent = 'SNAKE 3D';
         content.appendChild(title);
+
+        if (this.invitedRoomSeed !== null) {
+            const message = document.createElement('p');
+            message.className = 'welcome-room-invitation';
+            message.textContent = `You are about to appear in room number ${this.invitedRoomSeed}.`;
+            content.appendChild(message);
+
+            const actions = document.createElement('div');
+            actions.className = 'welcome-room-actions';
+            for (const [mode, label] of [
+                ['player', 'PLAY AS PLAYER'],
+                ['spectator', 'WATCH AS SPECTATOR'],
+            ] as const) {
+                const button = document.createElement('button');
+                button.className = 'start-btn welcome-room-action';
+                button.textContent = label;
+                button.addEventListener('click', () => this.handleStart(mode));
+                actions.appendChild(button);
+            }
+            content.appendChild(actions);
+            container.appendChild(content);
+            return container;
+        }
 
         // High Score
         const user = networkManager.getUser();
@@ -116,7 +142,7 @@ export class WelcomeScreen {
             <span class="start-btn-text">START</span>
             <span class="start-btn-icon">▶</span>
         `;
-        startButton.addEventListener('click', () => this.handleStart());
+        startButton.addEventListener('click', () => this.handleStart('player'));
         content.appendChild(startButton);
 
         container.appendChild(content);
@@ -124,13 +150,13 @@ export class WelcomeScreen {
         return container;
     }
 
-    private handleStart(): void {
+    private handleStart(mode: 'player' | 'spectator'): void {
         this.container.classList.remove('active');
         this.container.classList.add('hiding');
 
         // Wait for animation to complete
         setTimeout(() => {
-            this.onStart();
+            this.onStart(mode);
             this.container.remove();
         }, 600);
     }

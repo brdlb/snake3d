@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { chooseSpawn, rankNextRooms, replayReplacementOrder, ROOM_REPLAYS_QUERY } from './index';
+import { chooseSpawn, parseRoomSeed, playerInputEvent, rankNextRooms, replayReplacementOrder, ROOM_REPLAYS_QUERY } from './index';
 
 describe('room selection rules', () => {
+  it('accepts only a safe integer invitation seed', () => {
+    expect(parseRoomSeed('123')).toBe(123);
+    expect(parseRoomSeed('-1')).toBeNull();
+    expect(parseRoomSeed('12.2')).toBeNull();
+    expect(parseRoomSeed('9007199254740992')).toBeNull();
+  });
   it('prefers ELO distance, then occupied phantom count', () => {
     const rooms = rankNextRooms([
       { id: 'far', averageElo: 1200, phantomCount: 3 },
@@ -38,13 +44,20 @@ describe('room selection rules', () => {
     ], 0)).toBe(1);
   });
 
-  it('deletes a player replay before inserting its replacement', () => {
-    expect(replayReplacementOrder(true, false)).toEqual(['deletePlayerReplay', 'insertReplay']);
-    expect(replayReplacementOrder(true, true)).toEqual(['deleteRoomMinimum', 'deletePlayerReplay', 'insertReplay']);
+  it('keeps earlier player replays and replaces only the room minimum at capacity', () => {
+    expect(replayReplacementOrder(true, false)).toEqual(['insertReplay']);
+    expect(replayReplacementOrder(true, true)).toEqual(['deleteRoomMinimum', 'insertReplay']);
   });
 
   it('returns every saved room replay, including the restarting player replay', () => {
     expect(ROOM_REPLAYS_QUERY).toContain('WHERE room_seed=?');
     expect(ROOM_REPLAYS_QUERY).not.toContain('user_id<>');
+  });
+
+  it('relays input telemetry without tick or payload validation', () => {
+    const action = { type: 'direction', direction: { x: 1, y: 0, z: 0 } };
+    expect(playerInputEvent({ id: 'player-1', username: 'Snake' }, { timestamp: 1234, action })).toEqual({
+      user: { id: 'player-1', username: 'Snake' }, timestamp: 1234, action,
+    });
   });
 });

@@ -890,3 +890,38 @@ body {
   text-transform: uppercase;
   letter-spacing: 1px;
 }
+
+.welcome-room-invitation {
+  margin: 0 0 24px;
+  max-width: 360px;
+  text-align: center;
+  font-size: 1.2rem;
+  line-height: 1.4;
+}
+
+.welcome-room-actions {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 360px);
+}
+
+.welcome-room-action {
+  width: 100%;
+  font-size: 1rem;
+}
+
+.spectator-banner {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  z-index: 1500;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border: 1px solid rgba(125, 211, 252, .8);
+  border-radius: 999px;
+  background: rgba(3, 12, 22, .82);
+  color: #c7efff;
+  font-size: .8rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+}

@@ -1,0 +1,25 @@
+/** Deterministic, renderer-free rules used by both the browser and the Room DO. */
+export type Axis = { x: number; y: number; z: number };
+export type FoodKind = 'green' | 'blue' | 'pink';
+export type Food = Axis & { kind: FoodKind };
+export type SimPlayer = { id: string; name: string; segments: Axis[]; direction: Axis; score: number; speed: number; growth: number; alive: boolean; phantom?: boolean; color: string; nextStepAt: number };
+export type SimulationState = { seed: number; tick: number; food: Food[]; players: Record<string, SimPlayer> };
+export const WORLD_SIZE = 50, FOOD_COUNT = 200, BASE_SPEED = 300;
+const directions: Axis[] = [{x:1,y:0,z:0},{x:-1,y:0,z:0},{x:0,y:1,z:0},{x:0,y:-1,z:0},{x:0,y:0,z:1},{x:0,y:0,z:-1}];
+const key = (v: Axis) => `${v.x},${v.y},${v.z}`;
+const same = (a: Axis,b: Axis) => a.x===b.x&&a.y===b.y&&a.z===b.z;
+const add = (a: Axis,b: Axis):Axis => ({x:a.x+b.x,y:a.y+b.y,z:a.z+b.z});
+const inBounds = (p: Axis) => p.x>=0&&p.x<=WORLD_SIZE&&p.y>=0&&p.y<=WORLD_SIZE&&p.z>=0&&p.z<=WORLD_SIZE;
+const rng = (seed: number) => () => { let t=seed+=0x6D2B79F5; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; };
+export function foodEffect(kind: FoodKind) { return kind==='green'?{score:5,growth:3,speed:50}:kind==='blue'?{score:15,growth:5,speed:10}:{score:3,growth:3,speed:-10}; }
+export function createSimulation(seed: number): SimulationState { const random=rng(seed), food:Food[]=[]; while(food.length<FOOD_COUNT){const p={x:Math.floor(random()*51),y:Math.floor(random()*51),z:Math.floor(random()*51)};if(!food.some(f=>same(f,p)))food.push({...p,kind:random()<.5?'blue':random()<.8?'green':'pink'});} return {seed,tick:0,food,players:{}}; }
+export function safeSpawn(state: SimulationState, random = rng(state.seed + state.tick + Object.keys(state.players).length)): { position:Axis; direction:Axis } {
+ const blocked=new Set(Object.values(state.players).flatMap(p=>p.segments).map(key));
+ for(let i=0;i<4096;i++){const position={x:1+Math.floor(random()*49),y:1+Math.floor(random()*49),z:1+Math.floor(random()*49)};const direction=directions[Math.floor(random()*directions.length)];const tail={x:position.x-direction.x*2,y:position.y-direction.y*2,z:position.z-direction.z*2};if(inBounds(tail)&&!blocked.has(key(position))&&!blocked.has(key(tail)))return {position,direction};}
+ return {position:{x:25,y:25,z:25},direction:{x:0,y:0,z:-1}};
+}
+export function addPlayer(state:SimulationState, id:string, name:string, now:number, options:Partial<Pick<SimPlayer,'phantom'|'score'|'color'|'segments'|'direction'>>={}) { const spawn=safeSpawn(state);const direction=options.direction??spawn.direction, head=options.segments?.[0]??spawn.position;state.players[id]={id,name,segments:options.segments??[head,add(head,{x:-direction.x,y:-direction.y,z:-direction.z}),add(head,{x:-2*direction.x,y:-2*direction.y,z:-2*direction.z})],direction,score:options.score??0,speed:BASE_SPEED,growth:0,alive:true,phantom:options.phantom,color:options.color??(options.phantom?'#7dd3fc':'#ffffff'),nextStepAt:now+200};return state.players[id]; }
+export function validInput(current:Axis, next:unknown): next is Axis { if(!next||typeof next!=='object')return false;const v=next as Axis;return directions.some(d=>same(d,v))&&!(v.x===-current.x&&v.y===-current.y&&v.z===-current.z); }
+function respawn(state:SimulationState,index:number) {const random=rng(state.seed+state.tick*7919+index), occupied=new Set(Object.values(state.players).flatMap(p=>p.segments).map(key));for(let i=0;i<4096;i++){const p={x:Math.floor(random()*51),y:Math.floor(random()*51),z:Math.floor(random()*51)};if(!occupied.has(key(p))&&!state.food.some((f,n)=>n!==index&&same(f,p))){state.food[index]={...p,kind:random()<.5?'blue':random()<.8?'green':'pink'};return;}}}
+export function stepSimulation(state:SimulationState, now:number) { const due=Object.values(state.players).filter(p=>p.alive&&p.nextStepAt<=now); if(!due.length)return false; const next=new Map(due.map(p=>[p.id,add(p.segments[0],p.direction)])); const occupied=new Set(Object.values(state.players).flatMap(p=>p.segments).map(key)); for(const player of due){const head=next.get(player.id)!;if(!inBounds(head)||occupied.has(key(head))||[...next.entries()].some(([id,p])=>id!==player.id&&same(p,head))){player.alive=false;continue;} const foodIndex=state.food.findIndex(f=>same(f,head));if(foodIndex>=0){const effect=foodEffect(state.food[foodIndex].kind);player.score+=effect.score;player.growth+=effect.growth;player.speed=Math.max(60,player.speed+effect.speed);respawn(state,foodIndex);}const tail=player.growth>0?player.segments[player.segments.length-1]:undefined;if(player.growth>0)player.growth--;player.segments=[head,...player.segments.slice(0,tail?player.segments.length:player.segments.length-1)];if(tail)player.segments.push(tail);player.nextStepAt+=60000/player.speed;} state.tick++;return true; }
+export function chooseLowestPhantom(players: SimPlayer[]) { return players.filter(p=>p.phantom).sort((a,b)=>a.score-b.score||a.id.localeCompare(b.id))[0]; }

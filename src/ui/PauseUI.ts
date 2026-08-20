@@ -31,6 +31,8 @@ export class PauseUI {
     private foodGreenEl!: HTMLElement;
     private foodBlueEl!: HTMLElement;
     private foodPinkEl!: HTMLElement;
+    private roomEl!: HTMLButtonElement;
+    private roomSeed: number | null = null;
 
     private onResume: () => void;
     private onSettings: () => void;
@@ -54,6 +56,14 @@ export class PauseUI {
         title.className = 'pause-title';
         title.textContent = 'PAUSE';
         titlePanel.appendChild(title);
+
+        this.roomEl = document.createElement('button');
+        this.roomEl.type = 'button';
+        this.roomEl.className = 'pause-room';
+        this.roomEl.textContent = 'You exist in room 0';
+        this.roomEl.title = 'Copy invitation link';
+        this.roomEl.onclick = () => void this.copyRoomLink();
+        titlePanel.appendChild(this.roomEl);
 
         // 2. Stats Panel
         const statsPanel = document.createElement('div');
@@ -194,6 +204,8 @@ export class PauseUI {
             .title-panel {
                 padding: 20px 80px;
                 border-right-color: #fff;
+                flex-direction: column;
+                align-items: flex-start;
                 /* No delay */
             }
 
@@ -205,6 +217,24 @@ export class PauseUI {
                 letter-spacing: 4px;
                 text-transform: uppercase;
                 line-height: 1;
+            }
+
+            .pause-room {
+                font-family: 'Jura', sans-serif;
+                font-size: 1rem;
+                font-weight: 700;
+                letter-spacing: 1px;
+                margin: 12px 0 0;
+                color: #aaa;
+                background: none;
+                border: 0;
+                padding: 0;
+                cursor: pointer;
+                text-align: left;
+            }
+            .pause-room:focus-visible, .pause-room:hover {
+                color: #fff;
+                text-decoration: underline;
             }
 
             /* Stats Panel specific */
@@ -324,6 +354,24 @@ export class PauseUI {
         this.foodGreenEl.textContent = stats.foodCount.green.toString();
         this.foodBlueEl.textContent = stats.foodCount.blue.toString();
         this.foodPinkEl.textContent = stats.foodCount.pink.toString();
+    }
+
+    public updateRoom(seed: number) {
+        this.roomSeed = seed;
+        this.roomEl.textContent = `You exist in room ${seed}`;
+    }
+
+    private async copyRoomLink() {
+        if (this.roomSeed === null) return;
+        const url = new URL(window.location.href);
+        url.search = `?room=${this.roomSeed}`;
+        try {
+            await navigator.clipboard.writeText(url.toString());
+            this.roomEl.textContent = 'Invitation link copied';
+        } catch {
+            this.roomEl.textContent = 'Could not copy invitation link';
+        }
+        window.setTimeout(() => { if (this.roomSeed !== null) this.roomEl.textContent = `You exist in room ${this.roomSeed}`; }, 1800);
     }
 
     private formatTime(seconds: number): string {

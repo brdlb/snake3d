@@ -78,6 +78,7 @@ export class Game {
 
     // Async Multiplayer: Phantoms & Replay
     private phantoms: Phantom[] = [];
+    private liveOpponents: Array<{ id: string; name: string; score: number; speed: number; alive: boolean; color: string; segments: THREE.Vector3[]; direction: THREE.Quaternion }> = [];
     private phantomMesh: THREE.InstancedMesh | null = null;
     private replayRecorder: ReplayRecorder | null = null;
     private networkManager: NetworkManager;
@@ -102,6 +103,9 @@ export class Game {
     private playerName: string;
 
     private lastRecordedDirection: THREE.Vector3 = new THREE.Vector3();
+    private liveWorld = false;
+    private isSpectating = false;
+    private spectatorBanner: HTMLDivElement | null = null;
 
     constructor() {
         // Initialize Player Name (Persistent)
@@ -283,6 +287,9 @@ export class Game {
                 this.leaderboardUI.setPlayerName(this.playerName);
             }
         });
+        this.networkManager.on('room.snapshot', (snapshot: any) => this.applyLiveSnapshot(snapshot));
+        this.networkManager.on('player.input', (input: any) => this.applyLiveInput(input));
+        this.networkManager.on('player.joined', (input: any) => this.applyLiveInput(input));
 
         // Visibility Handler to stop loop when tab is hidden
         this._visibilityHandler = () => {
@@ -314,7 +321,7 @@ export class Game {
         this.loop.start();
 
         // Welcome Screen - показываем приветственный экран
-        this.welcomeScreen = new WelcomeScreen(() => this.handleGameStart());
+        this.welcomeScreen = new WelcomeScreen((mode) => this.handleGameStart(mode));
 
         // Initialize Player Name
         const user = this.networkManager.getUser();
@@ -325,9 +332,14 @@ export class Game {
 
     private setupInputs() {
         const handleTurn = (action: () => void) => {
+            if (this.isSpectating) return;
             const prevDir = this.snake.direction.clone();
             action();
             if (!this.snake.direction.equals(prevDir)) {
+                if (this.liveWorld) {
+                    const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction);
+                    this.networkManager.sendDirection({ x: Math.round(direction.x), y: Math.round(direction.y), z: Math.round(direction.z) });
+                }
                 this.pathfinder.updatePathVisualization(this.snake.getHead(), this.snake.segments, this.snake.direction);
             }
         };
@@ -343,7 +355,10 @@ export class Game {
      * Инициализация комнаты с фантомами
      */
     private initializeRoom(data: RoomData): void {
+        this.liveWorld = this.networkManager.isConnected();
+        this.liveOpponents = [];
         this.currentSeed = data.seed;
+        this.pauseUI.updateRoom(data.seed);
 
         // Обновляем UI с seed комнаты
         // this.networkStatusUI.setSeed(data.seed);
@@ -384,15 +399,19 @@ export class Game {
      * Обработчик нажатия кнопки "Старт" на приветственном экране
      * Инициализирует аудио и запускает игру
      */
-    private async handleGameStart(): Promise<void> {
+    private async handleGameStart(mode: 'player' | 'spectator' = 'player'): Promise<void> {
         // Инициализируем AudioContext по клику пользователя
         await this.soundManager.initAudio();
 
         // Запрашиваем комнату с сервера (null = случайный seed)
+        this.isSpectating = mode === 'spectator';
         if (this.networkManager.isConnected()) {
-            const room = await this.networkManager.requestRoom('initial');
+            const requestedSeed = new URLSearchParams(window.location.search).get('room');
+            const roomSeed = requestedSeed !== null && /^\d+$/.test(requestedSeed) ? Number(requestedSeed) : null;
+            const room = await this.networkManager.requestRoom(roomSeed === null ? 'initial' : this.isSpectating ? 'spectate' : 'join', roomSeed ?? undefined);
+            if (roomSeed !== null) history.replaceState(null, '', `${location.pathname}${location.hash}`);
             this.initializeRoom(room);
-            this.cachePhantomsForOffline(room.phantoms);
+            if (!this.isSpectating) this.cachePhantomsForOffline(room.phantoms);
         } else {
             // Оффлайн режим — загружаем кэшированные фантомы или генерируем локально
             await this.initializeOfflineRoom();
@@ -400,8 +419,63 @@ export class Game {
 
         // Снимаем флаг ожидания старта
         this.isWaitingForStart = false;
+        if (this.isSpectating) this.showSpectatorBanner();
 
         console.log('Game started!');
+    }
+
+    private showSpectatorBanner(): void {
+        this.spectatorBanner = document.createElement('div');
+        this.spectatorBanner.className = 'spectator-banner';
+        this.spectatorBanner.textContent = `SPECTATING ROOM ${this.currentSeed}`;
+        document.body.appendChild(this.spectatorBanner);
+    }
+
+    private applyLiveSnapshot(snapshot: any) {
+        if (!snapshot || snapshot.seed !== this.currentSeed || !Array.isArray(snapshot.food) || !Array.isArray(snapshot.players)) return;
+        const me = this.networkManager.getUser()?.id;
+        const mine = snapshot.players.find((player: any) => player.id === me);
+        if (mine) {
+            this.snake.segments = mine.segments.map((position: any) => new THREE.Vector3(position.x, position.y, position.z));
+            this.snake.direction.setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(mine.direction.x, mine.direction.y, mine.direction.z));
+            this.score = mine.score;
+            this.currentSPM = mine.speed;
+        }
+        this.world.foodPositions = snapshot.food.map((food: any) => new THREE.Vector3(food.x, food.y, food.z));
+        this.world.foodColors = snapshot.food.map((food: any) => new THREE.Color(food.kind === 'green' ? FOOD_COLORS.GREEN : food.kind === 'pink' ? FOOD_COLORS.PINK : FOOD_COLORS.BLUE));
+        this.liveOpponents = snapshot.players.filter((player: any) => player.id !== me).map((player: any) => ({
+            id: player.id, name: player.name, score: player.score, speed: player.speed, alive: player.alive,
+            color: player.color, segments: player.segments.map((position: any) => new THREE.Vector3(position.x, position.y, position.z)),
+            direction: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(player.direction.x, player.direction.y, player.direction.z))
+        }));
+    }
+
+    /**
+     * Live rooms exchange only the player input.  The timestamp lets a client
+     * advance a remote snake over the time the WebSocket message spent in transit.
+     */
+    private applyLiveInput(input: any) {
+        const id = input?.user?.id;
+        if (!id || id === this.networkManager.getUser()?.id) return;
+        const action = input?.action;
+        let opponent = this.liveOpponents.find(player => player.id === id);
+        if (action?.type === 'spawn' && action.position && action.direction) {
+            const direction = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(action.direction.x, action.direction.y, action.direction.z));
+            const position = new THREE.Vector3(action.position.x, action.position.y, action.position.z);
+            opponent = { id, name: input.user.username ?? 'Player', score: 0, speed: 300, alive: true, color: '#ffffff', direction, segments: [position, position.clone().add(new THREE.Vector3(0, 0, 1).applyQuaternion(direction)), position.clone().add(new THREE.Vector3(0, 0, 2).applyQuaternion(direction))] };
+            this.liveOpponents = [...this.liveOpponents.filter(player => player.id !== id), opponent];
+        }
+        if (!opponent || action?.type !== 'direction' || !action.direction) return;
+
+        opponent.direction.setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(action.direction.x, action.direction.y, action.direction.z));
+        const inputTimestamp = typeof input.timestamp === 'number' ? input.timestamp : Date.now();
+        this.advanceLiveOpponent(opponent, Math.max(0, (Date.now() - inputTimestamp) / 1000));
+    }
+
+    private advanceLiveOpponent(opponent: { speed: number; segments: THREE.Vector3[]; direction: THREE.Quaternion }, seconds: number) {
+        const steps = Math.floor(seconds * opponent.speed / 60);
+        const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(opponent.direction).round();
+        for (let index = 0; index < steps; index++) opponent.segments.unshift(opponent.segments.pop()!.copy(opponent.segments[0]).add(direction));
     }
 
     /**
@@ -487,6 +561,7 @@ export class Game {
         this.pauseUI.dispose();
         this.hud.dispose();
         if (this.welcomeScreen) this.welcomeScreen.dispose();
+        this.spectatorBanner?.remove();
 
         // Dispose Resources
         this.snakeMesh.geometry.dispose();
@@ -528,6 +603,13 @@ export class Game {
             // Обновляем камеру для красивого вида
             const head = this.snake.getHead();
             this.cameraController.update(delta, head, this.snake.direction, 0);
+            return;
+        }
+
+        if (this.isSpectating) {
+            const focus = this.liveOpponents[0]?.segments[0] ?? this.phantoms[0]?.getHead() ?? this.snake.getHead();
+            this.cameraController.update(delta, focus, this.snake.direction, 0);
+            this.particleSystem.update(delta);
             return;
         }
 
@@ -575,6 +657,7 @@ export class Game {
         }
 
         // Logic Update
+        if (this.liveWorld) for (const opponent of this.liveOpponents) this.advanceLiveOpponent(opponent, delta);
         const preStepHead = this.snake.getHead().clone();
         if (this.snake.update(delta)) {
             // Step occurred - check if we need to record a direction change
@@ -725,8 +808,10 @@ export class Game {
             color: '#ffffff'
         });
 
-        // Add phantoms
-        for (const phantom of this.phantoms) {
+        // Online snapshots own the participant list; offline mode keeps replay phantoms.
+        if (this.liveWorld) for (const opponent of this.liveOpponents) {
+            players.push({ name: opponent.name, score: opponent.score, length: opponent.segments.length, speed: opponent.speed, isPlayer: false, color: opponent.color, isDead: !opponent.alive });
+        } else for (const phantom of this.phantoms) {
             // Include dead phantoms so they show up as dead in HUD
             const name = phantom.getPlayerName();
             players.push({
@@ -744,6 +829,9 @@ export class Game {
     }
 
     private checkCollisions() {
+        // Online rooms are server-authoritative. Local movement is only a short
+        // visual prediction until the next room.world snapshot arrives.
+        if (this.liveWorld) return;
         const head = this.snake.getHead();
         const snakeColor = new THREE.Color(0xffffff);
 
@@ -1026,7 +1114,7 @@ export class Game {
         if (this.foodMesh.instanceColor) this.foodMesh.instanceColor.needsUpdate = true;
 
         // Update Snake InstancedMesh
-        const count = this.snake.segments.length;
+        const count = this.isSpectating ? 0 : this.snake.segments.length;
         this.snakeMesh.count = count;
 
         // Prune old pulses
@@ -1094,6 +1182,18 @@ export class Game {
 
                     this.phantomMesh.setMatrixAt(phantomInstanceIndex, this.dummy.matrix);
                     this.phantomMesh.setColorAt(phantomInstanceIndex, phantom.phantomColor);
+                    phantomInstanceIndex++;
+                }
+            }
+            for (const opponent of this.liveOpponents) {
+                for (let i = 0; i < opponent.segments.length; i++) {
+                    this.dummy.position.copy(opponent.segments[i]);
+                    this.dummy.rotation.set(0, 0, 0);
+                    if (i === 0) this.dummy.quaternion.copy(opponent.direction);
+                    this.dummy.scale.set(1, 1, 1);
+                    this.dummy.updateMatrix();
+                    this.phantomMesh.setMatrixAt(phantomInstanceIndex, this.dummy.matrix);
+                    this.phantomMesh.setColorAt(phantomInstanceIndex, new THREE.Color(opponent.color));
                     phantomInstanceIndex++;
                 }
             }

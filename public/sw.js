@@ -1,4 +1,4 @@
-const CACHE_NAME = 'snake3d-v4';
+const CACHE_NAME = 'snake3d-v5';
 const STATIC_CACHE = [
   '/',
   '/index.html',
@@ -100,6 +100,12 @@ self.addEventListener('fetch', (event) => {
   }
 
   const url = new URL(event.request.url);
+  // Third-party telemetry (for example Cloudflare Insights) must not be
+  // routed through this cache. A blocked request has no cache fallback.
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
   // Account state and room upgrades are always live and must never be cached.
   if (url.pathname.startsWith('/api/') || event.request.headers.get('upgrade') === 'websocket') {
     return;
@@ -152,7 +158,7 @@ self.addEventListener('fetch', (event) => {
               console.error('[Service Worker] Fetch failed:', error);
               // Return offline fallback for navigation requests
               if (event.request.mode === 'navigate') {
-                return caches.match('/index.html');
+                return caches.match('/index.html').then((fallback) => fallback ?? Response.error());
               }
               throw error;
             });
@@ -162,9 +168,7 @@ self.addEventListener('fetch', (event) => {
     // For non-static assets, use network-first strategy with fallback to cache
     event.respondWith(
       fetch(event.request)
-        .catch(() => {
-          return caches.match(event.request);
-        })
+        .catch(() => caches.match(event.request).then((fallback) => fallback ?? Response.error()))
     );
   }
 });
