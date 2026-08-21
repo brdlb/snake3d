@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addPlayer, chooseLowestPhantom, createSimulation, safeSpawn, stepSimulation, validInput } from './simulation';
+import { addPlayer, advanceSimulation, chooseLowestPhantom, createSimulation, safeSpawn, stepSimulation, validInput } from './simulation';
 
 describe('live room simulation', () => {
   it('chooses an unoccupied dynamic spawn', () => {
@@ -34,5 +34,49 @@ describe('live room simulation', () => {
     addPlayer(state, 'strong', 'Strong', 0, { phantom: true, score: 9 });
     expect(chooseLowestPhantom(Object.values(state.players))).toBe(weak);
     expect(chooseLowestPhantom([live])).toBeUndefined();
+  });
+
+  it('kills a snake at a wall and records the authoritative reason', () => {
+    const state = createSimulation(3);
+    const player = addPlayer(state, 'a', 'A', 0, { segments: [{ x: 50, y: 1, z: 1 }, { x: 49, y: 1, z: 1 }], direction: { x: 1, y: 0, z: 0 } });
+    player.nextStepAt = 1;
+    const [delta] = advanceSimulation(state, 1);
+    expect(delta.deaths).toMatchObject([{ player: { id: 'a' }, reason: 'bounds', position: { x: 51, y: 1, z: 1 } }]);
+  });
+
+  it('handles self and opponent body collisions, but permits a vacating tail', () => {
+    const state = createSimulation(4);
+    const self = addPlayer(state, 'self', 'Self', 0, { segments: [{x:2,y:2,z:2},{x:2,y:2,z:3},{x:1,y:2,z:3},{x:1,y:2,z:2}], direction: {x:0,y:0,z:1} });
+    const other = addPlayer(state, 'other', 'Other', 0, { segments: [{x:10,y:10,z:10},{x:9,y:10,z:10}], direction: {x:-1,y:0,z:0} });
+    self.nextStepAt = other.nextStepAt = 1;
+    const [first] = advanceSimulation(state, 1);
+    expect(first.deaths.map(death => death.player.id)).toContain('self');
+    expect(other.alive).toBe(true);
+    const tailState = createSimulation(5);
+    const mover = addPlayer(tailState, 'm', 'M', 0, { segments: [{x:1,y:1,z:1},{x:1,y:1,z:2}], direction: {x:1,y:0,z:0} });
+    const tailOwner = addPlayer(tailState, 't', 'T', 0, { segments: [{x:3,y:1,z:1},{x:2,y:1,z:1}], direction: {x:1,y:0,z:0} });
+    mover.nextStepAt = tailOwner.nextStepAt = 1;
+    advanceSimulation(tailState, 1);
+    expect(mover.alive).toBe(true);
+    expect(mover.segments[0]).toEqual({x:2,y:1,z:1});
+  });
+
+  it('kills both snakes that reach the same cell in one atomic tick', () => {
+    const state = createSimulation(6);
+    const a = addPlayer(state, 'a', 'A', 0, { segments: [{x:1,y:1,z:1},{x:0,y:1,z:1}], direction: {x:1,y:0,z:0} });
+    const b = addPlayer(state, 'b', 'B', 0, { segments: [{x:3,y:1,z:1},{x:4,y:1,z:1}], direction: {x:-1,y:0,z:0} });
+    a.nextStepAt = b.nextStepAt = 1;
+    const [delta] = advanceSimulation(state, 1);
+    expect(delta.deaths).toHaveLength(2);
+    expect(delta.deaths.every(death => death.reason === 'head-to-head')).toBe(true);
+  });
+
+  it('returns food replacement and changed player state from the same tick', () => {
+    const state = createSimulation(7);
+    const p = addPlayer(state, 'a', 'A', 0, { segments: [{x:1,y:1,z:1},{x:0,y:1,z:1}], direction: {x:1,y:0,z:0} });
+    state.food = [{x:2,y:1,z:1,kind:'blue'}]; p.nextStepAt = 1;
+    const [delta] = advanceSimulation(state, 1);
+    expect(delta.food).toHaveLength(1);
+    expect(delta.changed[0]).toMatchObject({ id: 'a', score: 15, speed: 310, alive: true });
   });
 });

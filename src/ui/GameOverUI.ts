@@ -5,6 +5,7 @@ export class GameOverUI {
     private restartBtn!: HTMLButtonElement;
     private nextBtn!: HTMLButtonElement;
     private errorEl!: HTMLElement;
+    private saveStatusEl!: HTMLElement;
 
     // Stats Elements
     // Stats Elements
@@ -125,6 +126,11 @@ export class GameOverUI {
         this.errorEl.hidden = true;
         this.container.appendChild(this.errorEl);
 
+        this.saveStatusEl = document.createElement('p');
+        this.saveStatusEl.className = 'game-over-save-status';
+        this.saveStatusEl.hidden = true;
+        this.container.appendChild(this.saveStatusEl);
+
         document.body.appendChild(this.container);
 
         this.injectStyles();
@@ -216,6 +222,7 @@ export class GameOverUI {
                 background: #1a1a1a;
             }
             .game-over-error { color: #ff7575; font-family: 'Jura', sans-serif; font-weight: 700; }
+            .game-over-save-status { color: #86efac; font-family: 'Jura', sans-serif; font-weight: 700; }
         `;
         document.head.appendChild(style);
     }
@@ -240,6 +247,8 @@ export class GameOverUI {
     }
 
     public show() {
+        this.saveStatusEl.hidden = true;
+        this.saveStatusEl.textContent = '';
         this.container.classList.add('active');
     }
 
@@ -250,6 +259,11 @@ export class GameOverUI {
         this.nextBtn.textContent = loading ? 'PLEASE WAIT…' : 'NEXT';
         this.errorEl.hidden = !error;
         this.errorEl.textContent = error ?? '';
+    }
+
+    public setSaveStatus(message: string) {
+        this.saveStatusEl.hidden = false;
+        this.saveStatusEl.textContent = message;
     }
 
     public hide() {

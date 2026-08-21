@@ -261,9 +261,9 @@ export class Game {
         new NetworkStatusUI();
 
         // Listen for room data (phantoms)
-        this.networkManager.on('game:result', (result: { saved: boolean; message: string }) => {
+        this.networkManager.on('game.saved', (result: { saved: boolean; message: string }) => {
             console.log(`[Game] Game result: ${result.message}`);
-            if (result.saved) this.gameOverUI.setLoading(false);
+            if (result.saved) this.gameOverUI.setSaveStatus(result.message);
         });
 
         // Check if already authenticated (initialized in main.ts)
@@ -287,9 +287,10 @@ export class Game {
                 this.leaderboardUI.setPlayerName(this.playerName);
             }
         });
-        this.networkManager.on('room.snapshot', (snapshot: any) => this.applyLiveSnapshot(snapshot));
-        this.networkManager.on('player.input', (input: any) => this.applyLiveInput(input));
-        this.networkManager.on('player.joined', (input: any) => this.applyLiveInput(input));
+        this.networkManager.on('room.state', (snapshot: any) => this.applyLiveSnapshot(snapshot));
+        this.networkManager.on('player.changed', (change: any) => this.applyLivePlayer(change?.player));
+        this.networkManager.on('food.changed', (change: any) => this.applyLiveFood(change));
+        this.networkManager.on('player.died', (death: any) => this.applyLiveDeath(death));
 
         // Visibility Handler to stop loop when tab is hidden
         this._visibilityHandler = () => {
@@ -434,13 +435,6 @@ export class Game {
     private applyLiveSnapshot(snapshot: any) {
         if (!snapshot || snapshot.seed !== this.currentSeed || !Array.isArray(snapshot.food) || !Array.isArray(snapshot.players)) return;
         const me = this.networkManager.getUser()?.id;
-        const mine = snapshot.players.find((player: any) => player.id === me);
-        if (mine) {
-            this.snake.segments = mine.segments.map((position: any) => new THREE.Vector3(position.x, position.y, position.z));
-            this.snake.direction.setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(mine.direction.x, mine.direction.y, mine.direction.z));
-            this.score = mine.score;
-            this.currentSPM = mine.speed;
-        }
         this.world.foodPositions = snapshot.food.map((food: any) => new THREE.Vector3(food.x, food.y, food.z));
         this.world.foodColors = snapshot.food.map((food: any) => new THREE.Color(food.kind === 'green' ? FOOD_COLORS.GREEN : food.kind === 'pink' ? FOOD_COLORS.PINK : FOOD_COLORS.BLUE));
         this.liveOpponents = snapshot.players.filter((player: any) => player.id !== me).map((player: any) => ({
@@ -450,26 +444,31 @@ export class Game {
         }));
     }
 
-    /**
-     * Live rooms exchange only the player input.  The timestamp lets a client
-     * advance a remote snake over the time the WebSocket message spent in transit.
-     */
-    private applyLiveInput(input: any) {
-        const id = input?.user?.id;
-        if (!id || id === this.networkManager.getUser()?.id) return;
-        const action = input?.action;
-        let opponent = this.liveOpponents.find(player => player.id === id);
-        if (action?.type === 'spawn' && action.position && action.direction) {
-            const direction = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(action.direction.x, action.direction.y, action.direction.z));
-            const position = new THREE.Vector3(action.position.x, action.position.y, action.position.z);
-            opponent = { id, name: input.user.username ?? 'Player', score: 0, speed: 300, alive: true, color: '#ffffff', direction, segments: [position, position.clone().add(new THREE.Vector3(0, 0, 1).applyQuaternion(direction)), position.clone().add(new THREE.Vector3(0, 0, 2).applyQuaternion(direction))] };
-            this.liveOpponents = [...this.liveOpponents.filter(player => player.id !== id), opponent];
-        }
-        if (!opponent || action?.type !== 'direction' || !action.direction) return;
+    private applyLivePlayer(player: any) {
+        if (!player?.id || !Array.isArray(player.segments) || !player.direction) return;
+        const direction = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(player.direction.x, player.direction.y, player.direction.z));
+        const segments = player.segments.map((position: any) => new THREE.Vector3(position.x, position.y, position.z));
+        // The local player is predicted and resolved entirely by this client.
+        // Authoritative packets reconcile the shared world and remote players only.
+        if (player.id === this.networkManager.getUser()?.id) return;
+        const opponent = { id: player.id, name: player.name ?? 'Player', score: player.score, speed: player.speed, alive: player.alive, color: player.color ?? '#ffffff', segments, direction };
+        this.liveOpponents = [...this.liveOpponents.filter(existing => existing.id !== player.id), opponent];
+    }
 
-        opponent.direction.setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(action.direction.x, action.direction.y, action.direction.z));
-        const inputTimestamp = typeof input.timestamp === 'number' ? input.timestamp : Date.now();
-        this.advanceLiveOpponent(opponent, Math.max(0, (Date.now() - inputTimestamp) / 1000));
+    private applyLiveFood(change: any) {
+        if (!change?.removed || !change?.added) return;
+        const removed = new THREE.Vector3(change.removed.x, change.removed.y, change.removed.z);
+        const index = this.world.foodPositions.findIndex(position => position.equals(removed));
+        const added = new THREE.Vector3(change.added.x, change.added.y, change.added.z);
+        const color = new THREE.Color(change.added.kind === 'green' ? FOOD_COLORS.GREEN : change.added.kind === 'pink' ? FOOD_COLORS.PINK : FOOD_COLORS.BLUE);
+        if (index >= 0) { this.world.foodPositions[index] = added; this.world.foodColors[index] = color; }
+        else { this.world.foodPositions.push(added); this.world.foodColors.push(color); }
+    }
+
+    private applyLiveDeath(death: any) {
+        const player = death?.player;
+        if (!player) return;
+        if (player.id !== this.networkManager.getUser()?.id) this.applyLivePlayer(player);
     }
 
     private advanceLiveOpponent(opponent: { speed: number; segments: THREE.Vector3[]; direction: THREE.Quaternion }, seconds: number) {
@@ -829,9 +828,6 @@ export class Game {
     }
 
     private checkCollisions() {
-        // Online rooms are server-authoritative. Local movement is only a short
-        // visual prediction until the next room.world snapshot arrives.
-        if (this.liveWorld) return;
         const head = this.snake.getHead();
         const snakeColor = new THREE.Color(0xffffff);
 
@@ -847,6 +843,19 @@ export class Game {
             this.particleSystem.emit(head, this.snake.direction, 50, snakeColor);
             this.handleGameOver();
             return;
+        }
+
+        if (this.liveWorld) {
+            for (const opponent of this.liveOpponents) {
+                for (const segment of opponent.segments) {
+                    if (head.distanceToSquared(segment) < 0.1) {
+                        console.log("Game Over: Remote player collision");
+                        this.particleSystem.emit(head, this.snake.direction, 50, new THREE.Color(opponent.color));
+                        this.handleGameOver();
+                        return;
+                    }
+                }
+            }
         }
 
         // Check collision with phantom bodies (dead phantoms still block the player)
@@ -966,30 +975,14 @@ export class Game {
         this.hud.togglePauseButton(false);
         this.hud.setVisibility(false);
 
-        // Stop replay recording and send to server
+        // The room simulation is authoritative online and persists its own result.
         if (this.replayRecorder) {
             this.replayRecorder.stop();
-
-            const deathPosition = this.snake.getHead();
-            const replayData = this.replayRecorder.getReplayData(this.score, deathPosition, this.playerName);
-
-            if (this.networkManager.isConnected()) {
-                this.gameOverUI.setLoading(true);
-                this.pendingGameSubmission = {
-                    seed: this.currentSeed,
-                    replay: replayData,
-                    submissionId: crypto.randomUUID()
-                };
-                this.gameSavePromise = this.networkManager.submitGame(this.pendingGameSubmission);
-                this.gameSavePromise.catch(error => {
-                    this.gameSaveFailed = true;
-                    this.gameOverUI.setLoading(false, error instanceof Error ? error.message : 'Could not save the result. Try again.');
-                });
-                console.log(`[Game] Sent replay to server. Score: ${this.score}, Changes: ${this.replayRecorder.getChangeCount()}`);
-            } else {
+            if (!this.networkManager.isConnected()) {
+                const deathPosition = this.snake.getHead();
+                const replayData = this.replayRecorder.getReplayData(this.score, deathPosition, this.playerName);
                 // Оффлайн режим — сохраняем результат локально
                 await this.saveOfflineGameResult(replayData);
-                this.gameSavePromise = null;
             }
         }
     }
@@ -1029,9 +1022,6 @@ export class Game {
         }
     }
 
-    private gameSavePromise: Promise<unknown> | null = null;
-    private pendingGameSubmission: any = null;
-    private gameSaveFailed: boolean = false;
     private isRoomTransitionPending: boolean = false;
     private restartKeyWasPressed: boolean = false;
 
@@ -1040,11 +1030,6 @@ export class Game {
         this.isRoomTransitionPending = true;
         this.gameOverUI.setLoading(true);
         try {
-            if (this.gameSaveFailed && this.pendingGameSubmission) {
-                this.gameSaveFailed = false;
-                this.gameSavePromise = this.networkManager.submitGame(this.pendingGameSubmission);
-            }
-            await this.gameSavePromise;
             const room = this.networkManager.isConnected()
                 ? await this.networkManager.requestRoom(action, this.currentSeed)
                 : null;
@@ -1088,8 +1073,6 @@ export class Game {
             // Offline mode - use cached phantoms or empty room
             await this.initializeOfflineRoom();
         }
-        this.gameSavePromise = null;
-        this.pendingGameSubmission = null;
         } catch (error) {
             this.gameOverUI.setLoading(false, error instanceof Error ? error.message : 'Could not start a new room. Try again.');
         } finally {

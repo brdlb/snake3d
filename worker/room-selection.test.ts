@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { chooseSpawn, parseRoomSeed, playerInputEvent, rankNextRooms, replayReplacementOrder, ROOM_REPLAYS_QUERY } from './index';
+import { chooseSpawn, parseRoomSeed, rankNextRooms, replayReplacementOrder, ROOM_REPLAYS_QUERY } from './index';
 
 describe('room selection rules', () => {
   it('accepts only a safe integer invitation seed', () => {
@@ -54,10 +54,7 @@ describe('room selection rules', () => {
     expect(ROOM_REPLAYS_QUERY).not.toContain('user_id<>');
   });
 
-  it('relays input telemetry without tick or payload validation', () => {
-    const action = { type: 'direction', direction: { x: 1, y: 0, z: 0 } };
-    expect(playerInputEvent({ id: 'player-1', username: 'Snake' }, { timestamp: 1234, action })).toEqual({
-      user: { id: 'player-1', username: 'Snake' }, timestamp: 1234, action,
-    });
+  it('keeps the replay query scoped to a room for authoritative terminal records', () => {
+    expect(ROOM_REPLAYS_QUERY).toContain('room_seed=?');
   });
 });
