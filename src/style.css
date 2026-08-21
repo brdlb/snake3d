@@ -910,6 +910,12 @@ body {
   font-size: 1rem;
 }
 
+.welcome-start-error {
+  margin: 16px 0 0;
+  color: #ff8a8a;
+  font-size: 0.85rem;
+}
+
 .spectator-banner {
   position: fixed;
   top: 16px;

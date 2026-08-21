@@ -6,10 +6,10 @@ import { networkManager } from '../network/NetworkManager';
 
 export class WelcomeScreen {
     private container: HTMLDivElement;
-    private onStart: (mode: 'player' | 'spectator') => void;
+    private onStart: (mode: 'player' | 'spectator') => void | Promise<void>;
     private readonly invitedRoomSeed: number | null;
 
-    constructor(onStart: (mode: 'player' | 'spectator') => void) {
+    constructor(onStart: (mode: 'player' | 'spectator') => void | Promise<void>) {
         this.onStart = onStart;
         const room = new URLSearchParams(window.location.search).get('room');
         this.invitedRoomSeed = room !== null && /^\d+$/.test(room) && Number.isSafeInteger(Number(room)) ? Number(room) : null;
@@ -50,9 +50,15 @@ export class WelcomeScreen {
                 ['spectator', 'WATCH AS SPECTATOR'],
             ] as const) {
                 const button = document.createElement('button');
+                // An invite can be embedded in a form by a host page.  Do not let
+                // the browser treat this action as a form submission/navigation.
+                button.type = 'button';
                 button.className = 'start-btn welcome-room-action';
                 button.textContent = label;
-                button.addEventListener('click', () => this.handleStart(mode));
+                button.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    void this.handleStart(mode);
+                });
                 actions.appendChild(button);
             }
             content.appendChild(actions);
@@ -137,12 +143,16 @@ export class WelcomeScreen {
 
         // Start button
         const startButton = document.createElement('button');
+        startButton.type = 'button';
         startButton.className = 'start-btn';
         startButton.innerHTML = `
             <span class="start-btn-text">START</span>
             <span class="start-btn-icon">▶</span>
         `;
-        startButton.addEventListener('click', () => this.handleStart('player'));
+        startButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            void this.handleStart('player');
+        });
         content.appendChild(startButton);
 
         container.appendChild(content);
@@ -150,15 +160,31 @@ export class WelcomeScreen {
         return container;
     }
 
-    private handleStart(mode: 'player' | 'spectator'): void {
+    private async handleStart(mode: 'player' | 'spectator'): Promise<void> {
         this.container.classList.remove('active');
         this.container.classList.add('hiding');
 
         // Wait for animation to complete
-        setTimeout(() => {
-            this.onStart(mode);
+        await new Promise<void>(resolve => setTimeout(resolve, 600));
+        try {
+            await this.onStart(mode);
             this.container.remove();
-        }, 600);
+        } catch (error) {
+            console.error('[Welcome] Unable to enter the room', error);
+            this.container.classList.remove('hiding');
+            this.container.classList.add('active');
+            this.showStartError('Unable to enter this room. Please try again.');
+        }
+    }
+
+    private showStartError(message: string): void {
+        let error = this.container.querySelector<HTMLParagraphElement>('.welcome-start-error');
+        if (!error) {
+            error = document.createElement('p');
+            error.className = 'welcome-start-error';
+            this.container.querySelector('.welcome-content')?.appendChild(error);
+        }
+        error.textContent = message;
     }
 
     public dispose(): void {

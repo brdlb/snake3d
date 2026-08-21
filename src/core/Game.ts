@@ -413,7 +413,6 @@ export class Game {
             const requestedSeed = new URLSearchParams(window.location.search).get('room');
             const roomSeed = requestedSeed !== null && /^\d+$/.test(requestedSeed) ? Number(requestedSeed) : null;
             const room = await this.networkManager.requestRoom(roomSeed === null ? 'initial' : this.isSpectating ? 'spectate' : 'join', roomSeed ?? undefined);
-            if (roomSeed !== null) history.replaceState(null, '', `${location.pathname}${location.hash}`);
             this.initializeRoom(room);
             if (!this.isSpectating) this.cachePhantomsForOffline(room.phantoms);
         } else {
