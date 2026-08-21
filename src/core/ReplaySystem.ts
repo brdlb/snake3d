@@ -135,7 +135,16 @@ export class ReplayPlayer {
 
     constructor(replayData: ReplayData) {
         this.trajectoryLog = replayData.trajectoryLog;
-        this.startParams = replayData.startParams;
+        // Older saved and IndexedDB-cached replays predate startParams.  Keep
+        // them playable instead of aborting room initialization.
+        const legacyStartParams = replayData.startParams;
+        this.startParams = {
+            seed: legacyStartParams?.seed ?? 0,
+            spawnIndex: legacyStartParams?.spawnIndex ?? 0,
+            initialSpeed: legacyStartParams?.initialSpeed ?? 300,
+            startPosition: legacyStartParams?.startPosition,
+            startDirection: legacyStartParams?.startDirection
+        };
         this.deathPosition = fromVec3(replayData.deathPosition);
         this.replayId = replayData.id;
         this.finalScore = replayData.finalScore;
