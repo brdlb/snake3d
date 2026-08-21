@@ -263,7 +263,10 @@ export class Game {
         // Listen for room data (phantoms)
         this.networkManager.on('game.saved', (result: { saved: boolean; message: string }) => {
             console.log(`[Game] Game result: ${result.message}`);
-            if (result.saved) this.gameOverUI.setSaveStatus(result.message);
+            if (result.saved) {
+                this.gameOverUI.setLoading(false);
+                this.gameOverUI.setSaveStatus(result.message);
+            }
         });
 
         // Check if already authenticated (initialized in main.ts)
