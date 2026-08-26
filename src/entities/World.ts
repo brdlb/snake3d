@@ -83,7 +83,7 @@ export class World {
         return -1;
     }
 
-    public respawnFood(snakeSegments: THREE.Vector3[], index: number = -1, useSeeded: boolean = true) {
+    public respawnFood(snakeSegments: THREE.Vector3[], index: number = -1, useSeeded: boolean = true, additionalBlocked: THREE.Vector3[] = []) {
         // Для начальной генерации используем seeded random,
         // для респавна одиночной еды используем Math.random (не влияет на синхронизацию)
         const rng = useSeeded ? this.random : Math.random;
@@ -101,8 +101,8 @@ export class World {
             while (!valid && attempts < 1000) {
                 const newPos = generatePos();
 
-                // Check overlap with snake
-                const overlapSnake = snakeSegments.some(seg => seg.distanceToSquared(newPos) < 0.1);
+                // Check overlap with the player and other live entities.
+                const overlapSnake = [...snakeSegments, ...additionalBlocked].some(seg => seg.distanceToSquared(newPos) < 0.1);
 
                 // Check overlap with other food (optional, but good for 50 items)
                 const overlapFood = this.foodPositions.some((pos, i) => i !== idx && pos.distanceToSquared(newPos) < 0.1);

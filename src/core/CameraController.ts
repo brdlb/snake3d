@@ -135,7 +135,8 @@ export class CameraController {
     private orbitTime: number = 0;
     private orbitBaseQuat: THREE.Quaternion = new THREE.Quaternion();
 
-    public setOrbitMode() {
+    public setOrbitMode(center?: THREE.Vector3) {
+        if (center) this.cameraRig.position.copy(center);
         this.isOrbiting = true;
         this.orbitTime = 0;
         this.orbitBaseQuat.copy(this.cameraRig.quaternion);

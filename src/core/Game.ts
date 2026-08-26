@@ -78,7 +78,8 @@ export class Game {
 
     // Async Multiplayer: Phantoms & Replay
     private phantoms: Phantom[] = [];
-    private liveOpponents: Array<{ id: string; name: string; score: number; speed: number; alive: boolean; color: string; segments: THREE.Vector3[]; direction: THREE.Quaternion }> = [];
+    private liveOpponents: Array<{ id: string; name: string; score: number; speed: number; alive: boolean; color: string; segments: THREE.Vector3[]; direction: THREE.Quaternion; directionVector: THREE.Vector3; up: THREE.Vector3; elapsed: number; serverTick: number; serverTime: number }> = [];
+    private localEntityId: string | null = null;
     private phantomMesh: THREE.InstancedMesh | null = null;
     private replayRecorder: ReplayRecorder | null = null;
     private networkManager: NetworkManager;
@@ -105,7 +106,21 @@ export class Game {
     private lastRecordedDirection: THREE.Vector3 = new THREE.Vector3();
     private liveWorld = false;
     private isSpectating = false;
+    private selectedRoomSeed: number | null = null;
+    private initialSpectatorPromise: Promise<void> | null = null;
+    private liveEventTicks = new Map<string, number>();
+    private lastLiveTick: number | null = null;
     private spectatorBanner: HTMLDivElement | null = null;
+    private playerTick = 0;
+    private phantomTicks = new Map<string, number>();
+
+    private logAction(action: string, data: unknown): void {
+        console.log(`[ActionLog] ${action}`, data);
+    }
+
+    private positionData(position: THREE.Vector3) {
+        return { x: position.x, y: position.y, z: position.z };
+    }
 
     constructor() {
         // Initialize Player Name (Persistent)
@@ -290,8 +305,14 @@ export class Game {
                 this.leaderboardUI.setPlayerName(this.playerName);
             }
         });
+        this.networkManager.on('roomSocketConnected', () => {
+        });
         this.networkManager.on('room.state', (snapshot: any) => this.applyLiveSnapshot(snapshot));
-        this.networkManager.on('player.changed', (change: any) => this.applyLivePlayer(change?.player));
+        this.networkManager.on('player.joined', () => this.networkManager.requestResync());
+        this.networkManager.on('room.left', (change: any) => {
+            if (change?.entityId) this.liveOpponents = this.liveOpponents.filter(opponent => opponent.id !== change.entityId);
+        });
+        this.networkManager.on('player.directionChanged', (change: any) => this.applyLiveDirection(change));
         this.networkManager.on('food.changed', (change: any) => this.applyLiveFood(change));
         this.networkManager.on('player.died', (death: any) => this.applyLiveDeath(death));
 
@@ -326,6 +347,9 @@ export class Game {
 
         // Welcome Screen - показываем приветственный экран
         this.welcomeScreen = new WelcomeScreen((mode) => this.handleGameStart(mode));
+        if (new URLSearchParams(window.location.search).get('room') === null) {
+            this.initialSpectatorPromise = this.handleGameStart('spectator');
+        }
 
         // Initialize Player Name
         const user = this.networkManager.getUser();
@@ -342,7 +366,8 @@ export class Game {
             if (!this.snake.direction.equals(prevDir)) {
                 if (this.liveWorld) {
                     const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction);
-                    this.networkManager.sendDirection({ x: Math.round(direction.x), y: Math.round(direction.y), z: Math.round(direction.z) });
+                    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.snake.direction);
+                    this.networkManager.sendDirection({ x: Math.round(direction.x), y: Math.round(direction.y), z: Math.round(direction.z) }, { x: Math.round(up.x), y: Math.round(up.y), z: Math.round(up.z) });
                 }
                 this.pathfinder.updatePathVisualization(this.snake.getHead(), this.snake.segments, this.snake.direction);
             }
@@ -361,6 +386,8 @@ export class Game {
     private initializeRoom(data: RoomData): void {
         this.liveWorld = this.networkManager.isConnected();
         this.liveOpponents = [];
+        this.playerTick = 0;
+        this.phantomTicks.clear();
         this.currentSeed = data.seed;
         this.pauseUI.updateRoom(data.seed);
 
@@ -379,6 +406,7 @@ export class Game {
 
         // Создаём фантомов из данных реплеев
         this.phantoms = data.phantoms.map((replayData: ReplayData, index: number) => {
+            this.logAction('phantom.received', { seed: data.seed, index, replay: replayData });
             return new Phantom(replayData, index);
         });
 
@@ -388,15 +416,21 @@ export class Game {
         console.log(`[Game] Spawn direction: (${spawnDir.x.toFixed(2)}, ${spawnDir.y.toFixed(2)}, ${spawnDir.z.toFixed(2)})`);
         console.log(`[Game] Initialized room with seed ${data.seed}, spawn ${this.playerSpawnIndex}, ${this.phantoms.length} phantoms`);
 
-        // Инициализируем запись реплея с индексом спауна и начальной скоростью
-        this.replayRecorder = new ReplayRecorder(data.seed, this.playerSpawnIndex, this.currentSPM);
-        // Начинаем запись с начальным направлением
-        const initialDir = new THREE.Vector3(0, 0, -1).applyQuaternion(spawn.direction);
-        if (Math.abs(initialDir.x) > 0.5) initialDir.set(Math.sign(initialDir.x), 0, 0);
-        else if (Math.abs(initialDir.y) > 0.5) initialDir.set(0, Math.sign(initialDir.y), 0);
-        else initialDir.set(0, 0, Math.sign(initialDir.z));
-        this.lastRecordedDirection.copy(initialDir);
-        this.replayRecorder.start(initialDir, spawn.position);
+        if (this.isSpectating) {
+            // Наблюдатель не управляет змейкой и не должен создавать реплей.
+            this.replayRecorder?.stop();
+            this.replayRecorder = null;
+        } else {
+            // Инициализируем запись реплея с индексом спауна и начальной скоростью
+            this.replayRecorder = new ReplayRecorder(data.seed, this.playerSpawnIndex, this.currentSPM);
+            // Начинаем запись с начальным направлением
+            const initialDir = new THREE.Vector3(0, 0, -1).applyQuaternion(spawn.direction);
+            if (Math.abs(initialDir.x) > 0.5) initialDir.set(Math.sign(initialDir.x), 0, 0);
+            else if (Math.abs(initialDir.y) > 0.5) initialDir.set(0, Math.sign(initialDir.y), 0);
+            else initialDir.set(0, 0, Math.sign(initialDir.z));
+            this.lastRecordedDirection.copy(initialDir);
+            this.replayRecorder.start(initialDir, spawn.position);
+        }
     }
 
     /**
@@ -404,16 +438,25 @@ export class Game {
      * Инициализирует аудио и запускает игру
      */
     private async handleGameStart(mode: 'player' | 'spectator' = 'player'): Promise<void> {
+        if (mode === 'player' && this.initialSpectatorPromise && this.selectedRoomSeed === null) {
+            await this.initialSpectatorPromise.catch(() => undefined);
+        }
         // Инициализируем AudioContext по клику пользователя
-        await this.soundManager.initAudio();
+        if (mode === 'player') await this.soundManager.initAudio();
 
         // Запрашиваем комнату с сервера (null = случайный seed)
         this.isSpectating = mode === 'spectator';
         if (this.networkManager.isConnected()) {
             const requestedSeed = new URLSearchParams(window.location.search).get('room');
-            const roomSeed = requestedSeed !== null && /^\d+$/.test(requestedSeed) ? Number(requestedSeed) : null;
-            const room = await this.networkManager.requestRoom(roomSeed === null ? 'initial' : this.isSpectating ? 'spectate' : 'join', roomSeed ?? undefined);
+            const invitedSeed = requestedSeed !== null && /^\d+$/.test(requestedSeed) ? Number(requestedSeed) : null;
+            const roomSeed = invitedSeed ?? (this.isSpectating ? null : this.selectedRoomSeed);
+            const action = this.isSpectating ? 'spectate' : roomSeed === null ? 'initial' : 'join';
+            const room = await this.networkManager.requestRoom(action, roomSeed ?? undefined);
+            this.selectedRoomSeed = room.seed;
             this.initializeRoom(room);
+            // The socket can deliver its initial snapshot before room initialization
+            // finishes. Request one more snapshot after the local room is ready.
+            if (this.liveWorld) this.networkManager.requestResync();
             if (!this.isSpectating) this.cachePhantomsForOffline(room.phantoms);
         } else {
             // Оффлайн режим — загружаем кэшированные фантомы или генерируем локально
@@ -422,7 +465,14 @@ export class Game {
 
         // Снимаем флаг ожидания старта
         this.isWaitingForStart = false;
-        if (this.isSpectating) this.showSpectatorBanner();
+        if (this.isSpectating) {
+            this.cameraController.setOrbitMode(new THREE.Vector3(WORLD_SIZE / 2, WORLD_SIZE / 2, WORLD_SIZE / 2));
+            this.showSpectatorBanner();
+        } else {
+            this.cameraController.stopOrbitMode();
+            this.spectatorBanner?.remove();
+            this.spectatorBanner = null;
+        }
 
         console.log('Game started!');
     }
@@ -437,47 +487,126 @@ export class Game {
     private applyLiveSnapshot(snapshot: any) {
         if (!snapshot || snapshot.seed !== this.currentSeed || !Array.isArray(snapshot.food) || !Array.isArray(snapshot.players)) return;
         const me = this.networkManager.getUser()?.id;
+        this.liveEventTicks.clear();
+        this.lastLiveTick = snapshot.tick;
         this.world.foodPositions = snapshot.food.map((food: any) => new THREE.Vector3(food.x, food.y, food.z));
         this.world.foodColors = snapshot.food.map((food: any) => new THREE.Color(food.kind === 'green' ? FOOD_COLORS.GREEN : food.kind === 'pink' ? FOOD_COLORS.PINK : FOOD_COLORS.BLUE));
-        this.liveOpponents = snapshot.players.filter((player: any) => player.id !== me).map((player: any) => ({
-            id: player.id, name: player.name, score: player.score, speed: player.speed, alive: player.alive,
-            color: player.color, segments: player.segments.map((position: any) => new THREE.Vector3(position.x, position.y, position.z)),
-            direction: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(player.direction.x, player.direction.y, player.direction.z))
-        }));
+        const localPlayer = this.localEntityId
+            ? snapshot.players.find((player: any) => player.entityId === this.localEntityId)
+            : snapshot.players.find((player: any) => player.id === me);
+        this.localEntityId = localPlayer?.entityId ?? null;
+        if (localPlayer?.segments?.length && localPlayer.direction) {
+            const direction = new THREE.Vector3(localPlayer.direction.x, localPlayer.direction.y, localPlayer.direction.z);
+            const up = new THREE.Vector3(localPlayer.up?.x ?? 0, localPlayer.up?.y ?? 1, localPlayer.up?.z ?? 0);
+            this.snake.applyAuthoritativeState(localPlayer.segments.map((position: any) => new THREE.Vector3(position.x, position.y, position.z)), this.orientationQuaternion(direction, up), localPlayer.speed ?? 300);
+            this.score = localPlayer.score ?? this.score;
+            this.currentSPM = localPlayer.speed ?? this.currentSPM;
+            this.logAction('player.serverTick', {
+                tick: snapshot.tick,
+                entityId: localPlayer.entityId,
+                position: localPlayer.segments[0],
+                direction: localPlayer.direction,
+                score: localPlayer.score,
+            });
+        }
+        this.liveOpponents = snapshot.players.filter((player: any) => player.entityId && player.entityId !== this.localEntityId).map((player: any) => { this.liveEventTicks.set(player.entityId, snapshot.tick); return this.createLiveOpponent(player, snapshot.tick, snapshot.serverTime); });
     }
 
-    private applyLivePlayer(player: any) {
-        if (!player?.id || !Array.isArray(player.segments) || !player.direction) return;
-        const direction = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(player.direction.x, player.direction.y, player.direction.z));
-        const segments = player.segments.map((position: any) => new THREE.Vector3(position.x, position.y, position.z));
-        // The local player is predicted and resolved entirely by this client.
-        // Authoritative packets reconcile the shared world and remote players only.
-        if (player.id === this.networkManager.getUser()?.id) return;
-        const opponent = { id: player.id, name: player.name ?? 'Player', score: player.score, speed: player.speed, alive: player.alive, color: player.color ?? '#ffffff', segments, direction };
-        this.liveOpponents = [...this.liveOpponents.filter(existing => existing.id !== player.id), opponent];
+    private createLiveOpponent(player: any, tick = 0, serverTime = Date.now()) {
+        const directionVector = new THREE.Vector3(player.direction?.x ?? 0, player.direction?.y ?? 0, player.direction?.z ?? -1).normalize();
+        const up = new THREE.Vector3(player.up?.x ?? 0, player.up?.y ?? 1, player.up?.z ?? 0).normalize();
+        const direction = this.orientationQuaternion(directionVector, up);
+        return { id: player.entityId ?? player.id, name: player.name ?? 'Player', score: player.score ?? 0, speed: player.speed ?? 300, alive: player.alive !== false, color: player.color ?? '#ffffff', segments: (player.segments ?? []).map((position: any) => new THREE.Vector3(position.x, position.y, position.z)), direction, directionVector, up, elapsed: 0, serverTick: tick, serverTime };
+    }
+
+    private orientationQuaternion(direction: THREE.Vector3, up: THREE.Vector3) {
+        const right = direction.clone().cross(up).normalize();
+        return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, direction.clone().negate()));
+    }
+
+    private applyLiveDirection(change: any) {
+        const entityId = change?.entityId;
+        if (!entityId || !change.direction || !change.up) return;
+        if (entityId === this.localEntityId) return;
+        const lastTick = this.liveEventTicks.get(entityId);
+        if (typeof change.tick !== 'number' || (lastTick !== undefined && change.tick < lastTick)) { if (lastTick !== undefined && change.tick < lastTick) this.networkManager.requestResync(); return; }
+        if (this.lastLiveTick !== null && change.tick < this.lastLiveTick) { this.networkManager.requestResync(); return; }
+        if (typeof change.tick === 'number') this.lastLiveTick = Math.max(this.lastLiveTick ?? change.tick, change.tick);
+        this.liveEventTicks.set(entityId, change.tick);
+        const opponent = this.liveOpponents.find(existing => existing.id === entityId);
+        if (!opponent) { this.networkManager.requestResync(); return; }
+        opponent.directionVector.set(change.direction.x, change.direction.y, change.direction.z).normalize();
+        opponent.up.set(change.up.x, change.up.y, change.up.z).normalize();
+        opponent.direction.copy(this.orientationQuaternion(opponent.directionVector, opponent.up));
+        opponent.speed = Math.max(60, change.speed ?? opponent.speed);
+        opponent.serverTick = change.tick;
+        opponent.serverTime = change.serverTime ?? Date.now();
     }
 
     private applyLiveFood(change: any) {
         if (!change?.removed || !change?.added) return;
+        if (typeof change.tick === 'number' && this.lastLiveTick !== null && change.tick < this.lastLiveTick) { this.networkManager.requestResync(); return; }
+        if (typeof change.tick === 'number') this.lastLiveTick = Math.max(this.lastLiveTick ?? change.tick, change.tick);
         const removed = new THREE.Vector3(change.removed.x, change.removed.y, change.removed.z);
         const index = this.world.foodPositions.findIndex(position => position.equals(removed));
         const added = new THREE.Vector3(change.added.x, change.added.y, change.added.z);
         const color = new THREE.Color(change.added.kind === 'green' ? FOOD_COLORS.GREEN : change.added.kind === 'pink' ? FOOD_COLORS.PINK : FOOD_COLORS.BLUE);
         if (index >= 0) { this.world.foodPositions[index] = added; this.world.foodColors[index] = color; }
         else { this.world.foodPositions.push(added); this.world.foodColors.push(color); }
+        if (change.entityId) {
+            if (change.entityId === this.localEntityId) {
+                if (typeof change.score === 'number') this.score = change.score;
+                if (typeof change.speed === 'number') this.currentSPM = change.speed;
+                if (typeof change.length === 'number') this.syncSnakeLength(change.length);
+            } else {
+                const opponent = this.liveOpponents.find(existing => existing.id === change.entityId);
+                if (opponent) { if (typeof change.score === 'number') opponent.score = change.score; if (typeof change.speed === 'number') opponent.speed = change.speed; if (typeof change.length === 'number') this.syncOpponentLength(opponent, change.length); }
+            }
+        }
     }
 
     private applyLiveDeath(death: any) {
         const player = death?.player;
         if (!player) return;
-        if (player.id !== this.networkManager.getUser()?.id) this.applyLivePlayer(player);
+        const isLocalPlayer = player.entityId === this.localEntityId;
+        this.logAction('player.death', {
+            tick: death.tick,
+            playerId: player.id,
+            entityId: player.entityId,
+            reason: death.reason ?? 'unknown reason',
+            position: death.position,
+        });
+        if (typeof death.tick === 'number' && this.lastLiveTick !== null && death.tick < this.lastLiveTick) { this.networkManager.requestResync(); return; }
+        if (typeof death.tick === 'number') this.lastLiveTick = Math.max(this.lastLiveTick ?? death.tick, death.tick);
+        if (!isLocalPlayer) {
+            const opponent = this.createLiveOpponent(player, death.tick, death.serverTime);
+            this.liveOpponents = [...this.liveOpponents.filter(existing => existing.id !== player.entityId), opponent];
+            return;
+        }
+        if (Array.isArray(player.segments) && player.direction) {
+            const direction = new THREE.Vector3(player.direction.x, player.direction.y, player.direction.z);
+            const up = new THREE.Vector3(player.up?.x ?? 0, player.up?.y ?? 1, player.up?.z ?? 0);
+            this.snake.applyAuthoritativeState(player.segments.map((position: any) => new THREE.Vector3(position.x, position.y, position.z)), this.orientationQuaternion(direction, up), player.speed ?? this.currentSPM);
+            this.score = player.score ?? this.score;
+            this.currentSPM = player.speed ?? this.currentSPM;
+        }
+        if (!this.isGameOver) void this.handleGameOver();
     }
 
-    private advanceLiveOpponent(opponent: { speed: number; segments: THREE.Vector3[]; direction: THREE.Quaternion }, seconds: number) {
-        const steps = Math.floor(seconds * opponent.speed / 60);
-        const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(opponent.direction).round();
-        for (let index = 0; index < steps; index++) opponent.segments.unshift(opponent.segments.pop()!.copy(opponent.segments[0]).add(direction));
+    private advanceLiveOpponent(opponent: { id: string; speed: number; segments: THREE.Vector3[]; directionVector: THREE.Vector3; elapsed: number; serverTick: number }, seconds: number) {
+        if (!opponent.segments.length) return;
+        opponent.elapsed += seconds;
+        const interval = 60 / Math.max(60, opponent.speed);
+        while (opponent.elapsed >= interval) {
+            opponent.elapsed -= interval;
+            const tail = opponent.segments.pop()!;
+            opponent.segments.unshift(tail.copy(opponent.segments[0]).add(opponent.directionVector));
+            this.logAction('phantom.tick', { entityId: opponent.id, tick: ++opponent.serverTick, position: this.positionData(opponent.segments[0]) });
+        }
     }
+
+    private syncOpponentLength(opponent: { segments: THREE.Vector3[] }, length: number) { while (opponent.segments.length < length) opponent.segments.push(opponent.segments[opponent.segments.length - 1].clone()); if (opponent.segments.length > length) opponent.segments.length = length; }
+    private syncSnakeLength(length: number) { while (this.snake.segments.length < length) this.snake.segments.push(this.snake.segments[this.snake.segments.length - 1].clone()); if (this.snake.segments.length > length) this.snake.segments.length = length; }
 
     /**
      * Инициализация комнаты в оффлайн режиме с кэшированными фантомами
@@ -661,6 +790,13 @@ export class Game {
         if (this.liveWorld) for (const opponent of this.liveOpponents) this.advanceLiveOpponent(opponent, delta);
         const preStepHead = this.snake.getHead().clone();
         if (this.snake.update(delta)) {
+            this.logAction('player.tick', {
+                tick: ++this.playerTick,
+                position: this.positionData(this.snake.getHead()),
+                direction: this.positionData(new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction)),
+                score: this.score,
+                length: this.snake.segments.length,
+            });
             // Step occurred - check if we need to record a direction change
             if (this.replayRecorder) {
                 const currentDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction);
@@ -677,14 +813,8 @@ export class Game {
                 }
             }
 
-            // выводим координаты и направление
-            const stepHead = this.snake.getHead();
-            const stepDir = new THREE.Vector3(0, 0, 1).applyQuaternion(this.snake.direction);
-
             // Stats: Distance (1 unit per step roughly, grid based)
             this.gameStats.distance += 1;
-
-            console.log(`[Step] Position: (${stepHead.x}, ${stepHead.y}, ${stepHead.z}) Direction: (${stepDir.x.toFixed(2)}, ${stepDir.y.toFixed(2)}, ${stepDir.z.toFixed(2)})`);
 
             // Calculate pitch based on speed (normalize around 300 SPM)
             // Clamp roughly between 0.8 and 1.5 to stay realistic
@@ -704,10 +834,26 @@ export class Game {
         for (const phantom of this.phantoms) {
             if (!phantom.isDeadNow()) {
                 // Phantom manages its own speed internally
-                if (phantom.update(delta)) {
+                const phantomStepped = phantom.update(delta);
+                if (phantom.isDeadNow()) {
+                    const phantomId = phantom.replayPlayer.replayId || `phantom-${this.phantoms.indexOf(phantom)}`;
+                    this.logAction('phantom.death', { replayId: phantomId, reason: 'replay', position: this.positionData(phantom.getHead()) });
+                }
+                if (phantomStepped && !phantom.isDeadNow()) {
+                    const phantomId = phantom.replayPlayer.replayId || `phantom-${this.phantoms.indexOf(phantom)}`;
+                    const phantomTick = (this.phantomTicks.get(phantomId) ?? 0) + 1;
+                    this.phantomTicks.set(phantomId, phantomTick);
+                    this.logAction('phantom.tick', {
+                        replayId: phantomId,
+                        tick: phantomTick,
+                        position: this.positionData(phantom.getHead()),
+                        direction: this.positionData(phantom.getMoveDirection()),
+                        score: phantom.getScore(),
+                        length: phantom.segments.length,
+                    });
                     // Safety check: Kill if out of bounds (prevents infinite walking if replay desyncs)
                     if (this.world.isOutOfBounds(phantom.getHead())) {
-                        console.warn(`[Game] Phantom ${phantom.getPlayerName()} went out of bounds at ${phantom.getHead().toArray()}. Killing.`);
+                        this.logAction('phantom.death', { replayId: phantomId, reason: 'bounds', position: this.positionData(phantom.getHead()) });
                         phantom.kill();
                         continue;
                     }
@@ -749,13 +895,22 @@ export class Game {
                         phantom.addScore(scorePoints);
 
                         // Respawn food when phantom eats it (phantoms compete with player for food)
-                        console.log(`[Phantom] Ate food at index ${phantomFoodIndex}, position: (${this.world.foodPositions[phantomFoodIndex].x}, ${this.world.foodPositions[phantomFoodIndex].y}, ${this.world.foodPositions[phantomFoodIndex].z})`);
-                        this.world.respawnFood(this.snake.segments, phantomFoodIndex);
-                        console.log(`[Phantom] Food respawned to: (${this.world.foodPositions[phantomFoodIndex].x}, ${this.world.foodPositions[phantomFoodIndex].y}, ${this.world.foodPositions[phantomFoodIndex].z})`);
+                        this.logAction('phantom.food', { replayId: phantomId, index: phantomFoodIndex, position: this.positionData(this.world.foodPositions[phantomFoodIndex]) });
+                        this.world.respawnFood(
+                            this.snake.segments,
+                            phantomFoodIndex,
+                            true,
+                            this.phantoms.flatMap(other => other.segments)
+                        );
+                        this.logAction('food.respawned', { by: phantomId, index: phantomFoodIndex, position: this.positionData(this.world.foodPositions[phantomFoodIndex]) });
                     }
                 }
             }
         }
+
+        // Phantom movement is independent from the player's step, so check
+        // their collisions after all phantom positions have been updated.
+        this.checkPhantomCollisions();
 
         const head = this.snake.getHead();
 
@@ -799,15 +954,18 @@ export class Game {
         // Build players list for HUD
         const players = [];
 
-        // Current player first
-        players.push({
-            name: this.playerName,
-            score: this.score,
-            length: currentLength,
-            speed: speed,
-            isPlayer: true,
-            color: '#ffffff'
-        });
+        // A spectator is not part of the room snapshot, so do not add a
+        // synthetic "current player" row to the room participant list.
+        if (!this.isSpectating) {
+            players.push({
+                name: this.playerName,
+                score: this.score,
+                length: currentLength,
+                speed: speed,
+                isPlayer: true,
+                color: '#ffffff'
+            });
+        }
 
         // Online snapshots own the participant list; offline mode keeps replay phantoms.
         if (this.liveWorld) for (const opponent of this.liveOpponents) {
@@ -835,6 +993,7 @@ export class Game {
 
         if (this.world.isOutOfBounds(head)) {
             console.log("Game Over: Bounds");
+            this.logAction('player.death', { tick: this.playerTick, reason: 'bounds', position: this.positionData(head) });
             this.particleSystem.emit(head, this.snake.direction, 50, snakeColor);
             this.handleGameOver();
             return;
@@ -842,6 +1001,7 @@ export class Game {
 
         if (this.world.checkSelfCollision(this.snake.segments)) {
             console.log("Game Over: Self");
+            this.logAction('player.death', { tick: this.playerTick, reason: 'self-collision', position: this.positionData(head) });
             this.particleSystem.emit(head, this.snake.direction, 50, snakeColor);
             this.handleGameOver();
             return;
@@ -852,6 +1012,7 @@ export class Game {
                 for (const segment of opponent.segments) {
                     if (head.distanceToSquared(segment) < 0.1) {
                         console.log("Game Over: Remote player collision");
+                        this.logAction('player.death', { tick: this.playerTick, reason: 'remote-player-collision', position: this.positionData(head), opponentId: opponent.id });
                         this.particleSystem.emit(head, this.snake.direction, 50, new THREE.Color(opponent.color));
                         this.handleGameOver();
                         return;
@@ -860,47 +1021,7 @@ export class Game {
             }
         }
 
-        // Check collision with phantom bodies (dead phantoms still block the player)
-        for (const phantom of this.phantoms) {
-            // Player head vs Phantom body (including dead phantoms - they remain obstacles)
-            for (const segment of phantom.segments) {
-                if (head.distanceToSquared(segment) < 0.1) {
-                    console.log("Game Over: Phantom collision");
-                    this.particleSystem.emit(head, this.snake.direction, 50, phantom.phantomColor);
-                    this.handleGameOver();
-                    return;
-                }
-            }
-
-            // Skip further checks for dead phantoms (they can't move or die again)
-            if (phantom.isDeadNow()) continue;
-
-            // Phantom head vs Player body (phantom dies)
-            const phantomHead = phantom.getHead();
-            for (let i = 1; i < this.snake.segments.length; i++) {
-                if (phantomHead.distanceToSquared(this.snake.segments[i]) < 0.1) {
-                    console.log(`Phantom ${phantom.replayPlayer.replayId} died: hit player`);
-                    phantom.kill();
-                    this.particleSystem.emit(phantomHead, phantom.direction, 30, phantom.phantomColor);
-                    break;
-                }
-            }
-
-            // Phantom vs Phantom collisions
-            for (const otherPhantom of this.phantoms) {
-                if (otherPhantom === phantom || otherPhantom.isDeadNow() || phantom.isDeadNow()) continue;
-
-                const otherHead = otherPhantom.getHead();
-                for (const segment of phantom.segments) {
-                    if (otherHead.distanceToSquared(segment) < 0.1) {
-                        console.log(`Phantom ${otherPhantom.replayPlayer.replayId} died: hit another phantom`);
-                        otherPhantom.kill();
-                        this.particleSystem.emit(otherHead, otherPhantom.direction, 30, otherPhantom.phantomColor);
-                        break;
-                    }
-                }
-            }
-        }
+        if (this.checkPhantomCollisions()) return;
 
         const foodIndex = this.world.checkFoodCollision(head);
         if (foodIndex !== -1) {
@@ -961,8 +1082,73 @@ export class Game {
                 originIndex: 0
             });
 
-            this.world.respawnFood(this.snake.segments, foodIndex);
+            this.world.respawnFood(
+                this.snake.segments,
+                foodIndex,
+                true,
+                this.phantoms.flatMap(phantom => phantom.segments)
+            );
         }
+    }
+
+    private checkPhantomCollisions(): boolean {
+        const playerHead = this.snake.getHead();
+
+        // Dead phantom bodies remain obstacles for the player, matching the
+        // existing game behavior.
+        for (const phantom of this.phantoms) {
+            if (phantom.segments.some(segment => playerHead.distanceToSquared(segment) < 0.1)) {
+                console.log("Game Over: Phantom collision");
+                this.logAction('player.death', { tick: this.playerTick, reason: 'phantom-collision', position: this.positionData(playerHead), phantomId: phantom.replayPlayer.replayId });
+                this.particleSystem.emit(playerHead, this.snake.direction, 50, phantom.phantomColor);
+                void this.handleGameOver();
+                return true;
+            }
+        }
+
+        for (const phantom of this.phantoms) {
+            if (phantom.isDeadNow()) continue;
+
+            const phantomHead = phantom.getHead();
+            if (this.snake.segments.slice(1).some(segment => phantomHead.distanceToSquared(segment) < 0.1)) {
+                this.logAction('phantom.death', { replayId: phantom.replayPlayer.replayId, reason: 'hit-player', position: this.positionData(phantomHead) });
+                phantom.kill();
+                this.particleSystem.emit(phantomHead, phantom.direction, 30, phantom.phantomColor);
+                continue;
+            }
+
+            if (phantom.segments.slice(1).some(segment => phantomHead.distanceToSquared(segment) < 0.1)) {
+                this.logAction('phantom.death', { replayId: phantom.replayPlayer.replayId, reason: 'self-collision', position: this.positionData(phantomHead) });
+                phantom.kill();
+                this.particleSystem.emit(phantomHead, phantom.direction, 30, phantom.phantomColor);
+            }
+        }
+
+        for (let i = 0; i < this.phantoms.length; i++) {
+            const first = this.phantoms[i];
+            if (first.isDeadNow()) continue;
+            for (let j = i + 1; j < this.phantoms.length; j++) {
+                const second = this.phantoms[j];
+                if (second.isDeadNow()) continue;
+
+                const firstHitsSecond = second.segments.some(segment => first.getHead().distanceToSquared(segment) < 0.1);
+                const secondHitsFirst = first.segments.some(segment => second.getHead().distanceToSquared(segment) < 0.1);
+                if (!firstHitsSecond && !secondHitsFirst) continue;
+
+                if (firstHitsSecond) {
+                    this.logAction('phantom.death', { replayId: first.replayPlayer.replayId, reason: 'phantom-collision', position: this.positionData(first.getHead()) });
+                    first.kill();
+                    this.particleSystem.emit(first.getHead(), first.direction, 30, first.phantomColor);
+                }
+                if (secondHitsFirst) {
+                    this.logAction('phantom.death', { replayId: second.replayPlayer.replayId, reason: 'phantom-collision', position: this.positionData(second.getHead()) });
+                    second.kill();
+                    this.particleSystem.emit(second.getHead(), second.direction, 30, second.phantomColor);
+                }
+            }
+        }
+
+        return false;
     }
 
     private async handleGameOver() {

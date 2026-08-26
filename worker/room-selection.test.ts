@@ -44,14 +44,25 @@ describe('room selection rules', () => {
     ], 0)).toBe(1);
   });
 
+  it('always changes spawn on restart when every spawn is occupied', () => {
+    expect(chooseSpawn([
+      { elo: 700, startParams: { spawnIndex: 0 } },
+      { elo: 1200, startParams: { spawnIndex: 1 } },
+      { elo: 1100, startParams: { spawnIndex: 2 } },
+      { elo: 1000, startParams: { spawnIndex: 3 } },
+    ], 0)).toBe(3);
+  });
+
   it('keeps earlier player replays and replaces only the room minimum at capacity', () => {
     expect(replayReplacementOrder(true, false)).toEqual(['insertReplay']);
     expect(replayReplacementOrder(true, true)).toEqual(['deleteRoomMinimum', 'insertReplay']);
   });
 
-  it('returns every saved room replay, including the restarting player replay', () => {
+  it('returns the best saved replay for each spawn in a room', () => {
     expect(ROOM_REPLAYS_QUERY).toContain('WHERE room_seed=?');
-    expect(ROOM_REPLAYS_QUERY).not.toContain('user_id<>');
+    expect(ROOM_REPLAYS_QUERY).toContain('PARTITION BY json_extract(payload_json');
+    expect(ROOM_REPLAYS_QUERY).toContain('ROW_NUMBER()');
+    expect(ROOM_REPLAYS_QUERY).not.toContain('LIMIT 3');
   });
 
   it('keeps the replay query scoped to a room for authoritative terminal records', () => {

@@ -24,6 +24,14 @@ export class Snake {
         this.moveInterval = interval;
     }
 
+    public applyAuthoritativeState(segments: THREE.Vector3[], direction: THREE.Quaternion, speed: number): void {
+        if (!segments.length) return;
+        this.segments = segments.map(segment => segment.clone());
+        this.direction.copy(direction);
+        this.setSpeed(60 / Math.max(60, speed));
+        this.accumulatedTime = 0;
+    }
+
     public reset(startPosition: THREE.Vector3, startDirection?: THREE.Quaternion) {
         this.segments = [];
 

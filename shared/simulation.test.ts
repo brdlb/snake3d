@@ -1,18 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { addPlayer, advanceSimulation, chooseLowestPhantom, createSimulation, safeSpawn, stepSimulation, validInput } from './simulation';
+import { addPlayer, advanceSimulation, chooseLowestPhantom, createSimulation, safeSpawn, stepSimulation, validInput, validOrientation } from './simulation';
 
 describe('live room simulation', () => {
   it('chooses an unoccupied dynamic spawn', () => {
     const state = createSimulation(42);
     addPlayer(state, 'a', 'A', 0);
     const spawn = safeSpawn(state, () => .5);
-    expect(state.players.a.segments.some(p => p.x === spawn.position.x && p.y === spawn.position.y && p.z === spawn.position.z)).toBe(false);
+    expect(Object.values(state.players).find(player => player.id === 'a')?.segments.some(p => p.x === spawn.position.x && p.y === spawn.position.y && p.z === spawn.position.z)).toBe(false);
   });
 
   it('rejects diagonal and immediate reverse input', () => {
     expect(validInput({ x: 0, y: 0, z: -1 }, { x: 1, y: 0, z: 0 })).toBe(true);
     expect(validInput({ x: 0, y: 0, z: -1 }, { x: 0, y: 0, z: 1 })).toBe(false);
     expect(validInput({ x: 0, y: 0, z: -1 }, { x: 1, y: 1, z: 0 })).toBe(false);
+  });
+
+  it('accepts only orthogonal unit direction and up vectors', () => {
+    expect(validOrientation({ x: 0, y: 0, z: -1 }, { x: 0, y: 1, z: 0 })).toBe(true);
+    expect(validOrientation({ x: 0, y: 0, z: -1 }, { x: 1, y: 1, z: 0 })).toBe(false);
+    expect(validOrientation({ x: 1, y: 0, z: 0 }, { x: 1, y: 0, z: 0 })).toBe(false);
   });
 
   it('simulates food and collision only on the server state', () => {
@@ -34,6 +40,32 @@ describe('live room simulation', () => {
     addPlayer(state, 'strong', 'Strong', 0, { phantom: true, score: 9 });
     expect(chooseLowestPhantom(Object.values(state.players))).toBe(weak);
     expect(chooseLowestPhantom([live])).toBeUndefined();
+  });
+
+  it('assigns a distinct entity id to every spawned entity', () => {
+    const state = createSimulation(8);
+    const player = addPlayer(state, 'same-user', 'Player', 0);
+    const phantom = addPlayer(state, 'phantom:replay', 'Phantom', 0, { phantom: true });
+    expect(player.entityId).not.toBe(phantom.entityId);
+  });
+
+  it('keeps multiple room entities with the same user id', () => {
+    const state = createSimulation(81);
+    const first = addPlayer(state, 'same-user', 'Player', 0);
+    const second = addPlayer(state, 'same-user', 'Player', 0, { phantom: true });
+    expect(first.entityId).not.toBe(second.entityId);
+    expect(Object.values(state.players)).toHaveLength(2);
+  });
+
+  it('restores a phantom at its recorded start position', () => {
+    const state = createSimulation(9);
+    const phantom = addPlayer(state, 'phantom:replay', 'Phantom', 0, {
+      phantom: true,
+      spawnIndex: 3,
+      startPosition: { x: 17, y: 18, z: 19 },
+      direction: { x: 0, y: 0, z: -1 },
+    });
+    expect(phantom.segments[0]).toEqual({ x: 17, y: 18, z: 19 });
   });
 
   it('kills a snake at a wall and records the authoritative reason', () => {
@@ -78,5 +110,6 @@ describe('live room simulation', () => {
     const [delta] = advanceSimulation(state, 1);
     expect(delta.food).toHaveLength(1);
     expect(delta.changed[0]).toMatchObject({ id: 'a', score: 15, speed: 310, alive: true });
+    expect(delta.food[0]).toMatchObject({ entityId: p.entityId, score: 15, speed: 310, length: 3 });
   });
 });

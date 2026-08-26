@@ -134,7 +134,7 @@ export class ReplayPlayer {
     private currentDirection: THREE.Vector3 = new THREE.Vector3();
 
     constructor(replayData: ReplayData) {
-        this.trajectoryLog = replayData.trajectoryLog;
+        this.trajectoryLog = Array.isArray(replayData.trajectoryLog) ? replayData.trajectoryLog : [];
         // Older saved and IndexedDB-cached replays predate startParams.  Keep
         // them playable instead of aborting room initialization.
         const legacyStartParams = replayData.startParams;

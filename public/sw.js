@@ -1,4 +1,4 @@
-const CACHE_NAME = 'snake3d-v5';
+const CACHE_NAME = 'snake3d-v6';
 const STATIC_CACHE = [
   '/',
   '/index.html',
