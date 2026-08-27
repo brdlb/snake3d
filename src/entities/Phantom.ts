@@ -33,6 +33,7 @@ export class Phantom {
 
     // Текущий вектор направления движения (единичный, snap to grid)
     private moveDirection: THREE.Vector3 = new THREE.Vector3();
+    private lastDirectionChange: { position: THREE.Vector3; direction: THREE.Vector3 } | null = null;
 
     // Temporary vectors для оптимизации
     private _tempVec: THREE.Vector3 = new THREE.Vector3();
@@ -108,6 +109,7 @@ export class Phantom {
         this.isDead = false;
         this.currentSPM = this.replayPlayer.getInitialSpeed();
         this.currentScore = 0;
+        this.lastDirectionChange = null;
 
         this.replayPlayer.reset();
     }
@@ -144,6 +146,7 @@ export class Phantom {
 
         if (this.accumulatedTime >= this.moveInterval) {
             this.accumulatedTime -= this.moveInterval;
+            this.lastDirectionChange = null;
 
             // Проверяем, нужно ли изменить направление (по позиции)
             const currentHead = this.getHead();
@@ -157,6 +160,7 @@ export class Phantom {
 
             // Применяем новое направление если есть
             if (newDirection) {
+                this.lastDirectionChange = { position: currentHead.clone(), direction: newDirection.clone() };
                 this.setMoveDirection(newDirection);
             }
 
@@ -166,6 +170,15 @@ export class Phantom {
         }
 
         return false;
+    }
+
+    /**
+     * Получить и сбросить изменение направления, обработанное из реплея.
+     */
+    public consumeDirectionChange(): { position: THREE.Vector3; direction: THREE.Vector3 } | null {
+        const change = this.lastDirectionChange;
+        this.lastDirectionChange = null;
+        return change;
     }
 
     /**

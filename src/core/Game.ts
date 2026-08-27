@@ -22,6 +22,7 @@ import { NetworkManager } from '../network/NetworkManager';
 import { NetworkStatusUI } from '../network/NetworkStatusUI';
 import { PauseUI, GameStats } from '../ui/PauseUI';
 import type { ReplayData, RoomData } from '../types/replay';
+import type { PlayerDirectionChanged, PlayerDied, PlayerStateChanged, RoomSnapshot, SnakeState } from '../../shared/realtime';
 
 interface Pulse {
     color: THREE.Color;
@@ -78,7 +79,8 @@ export class Game {
 
     // Async Multiplayer: Phantoms & Replay
     private phantoms: Phantom[] = [];
-    private liveOpponents: Array<{ id: string; name: string; score: number; speed: number; alive: boolean; color: string; segments: THREE.Vector3[]; direction: THREE.Quaternion; directionVector: THREE.Vector3; up: THREE.Vector3; elapsed: number; serverTick: number; serverTime: number }> = [];
+    private liveOpponents: Array<{ id: string; name: string; score: number; speed: number; alive: boolean; color: string; segments: THREE.Vector3[]; direction: THREE.Quaternion; directionVector: THREE.Vector3; up: THREE.Vector3; elapsed: number; serverTick: number; serverTime: number; replay?: ReplayData; replayIndex: number }> = [];
+    private livePhantomReplays = new Map<string, ReplayData>();
     private localEntityId: string | null = null;
     private phantomMesh: THREE.InstancedMesh | null = null;
     private replayRecorder: ReplayRecorder | null = null;
@@ -113,6 +115,10 @@ export class Game {
     private spectatorBanner: HTMLDivElement | null = null;
     private playerTick = 0;
     private phantomTicks = new Map<string, number>();
+    private localInputSeq = 0;
+    private localStateSeq = 0;
+    private localSnakeInitialized = false;
+    private wasBoosting = false;
 
     private logAction(action: string, data: unknown): void {
         console.log(`[ActionLog] ${action}`, data);
@@ -306,15 +312,17 @@ export class Game {
             }
         });
         this.networkManager.on('roomSocketConnected', () => {
+            if (this.liveWorld && !this.isSpectating) this.sendLivePlayerState('reconnect');
         });
-        this.networkManager.on('room.state', (snapshot: any) => this.applyLiveSnapshot(snapshot));
+        this.networkManager.on('room.state', (snapshot: RoomSnapshot) => this.applyLiveSnapshot(snapshot));
         this.networkManager.on('player.joined', () => this.networkManager.requestResync());
         this.networkManager.on('room.left', (change: any) => {
             if (change?.entityId) this.liveOpponents = this.liveOpponents.filter(opponent => opponent.id !== change.entityId);
         });
-        this.networkManager.on('player.directionChanged', (change: any) => this.applyLiveDirection(change));
+        this.networkManager.on('player.directionChanged', (change: PlayerDirectionChanged) => this.applyLiveDirection(change));
+        this.networkManager.on('player.state', (change: PlayerStateChanged) => this.applyLiveState(change));
         this.networkManager.on('food.changed', (change: any) => this.applyLiveFood(change));
-        this.networkManager.on('player.died', (death: any) => this.applyLiveDeath(death));
+        this.networkManager.on('player.died', (death: PlayerDied) => this.applyLiveDeath(death));
 
         // Visibility Handler to stop loop when tab is hidden
         this._visibilityHandler = () => {
@@ -365,9 +373,15 @@ export class Game {
             action();
             if (!this.snake.direction.equals(prevDir)) {
                 if (this.liveWorld) {
-                    const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction);
-                    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.snake.direction);
-                    this.networkManager.sendDirection({ x: Math.round(direction.x), y: Math.round(direction.y), z: Math.round(direction.z) }, { x: Math.round(up.x), y: Math.round(up.y), z: Math.round(up.z) });
+                    const state = this.livePlayerState();
+                    this.networkManager.sendDirection({
+                        type: 'direction',
+                        seq: ++this.localInputSeq,
+                        step: this.playerTick,
+                        head: this.positionData(this.snake.getHead()),
+                        direction: state.direction,
+                        up: state.up,
+                    });
                 }
                 this.pathfinder.updatePathVisualization(this.snake.getHead(), this.snake.segments, this.snake.direction);
             }
@@ -386,7 +400,12 @@ export class Game {
     private initializeRoom(data: RoomData): void {
         this.liveWorld = this.networkManager.isConnected();
         this.liveOpponents = [];
+        this.livePhantomReplays = new Map(data.phantoms.map(replay => [`phantom:${replay.id}`, replay]));
         this.playerTick = 0;
+        this.localInputSeq = 0;
+        this.localStateSeq = 0;
+        this.localSnakeInitialized = false;
+        this.wasBoosting = false;
         this.phantomTicks.clear();
         this.currentSeed = data.seed;
         this.pauseUI.updateRoom(data.seed);
@@ -451,13 +470,19 @@ export class Game {
             const invitedSeed = requestedSeed !== null && /^\d+$/.test(requestedSeed) ? Number(requestedSeed) : null;
             const roomSeed = invitedSeed ?? (this.isSpectating ? null : this.selectedRoomSeed);
             const action = this.isSpectating ? 'spectate' : roomSeed === null ? 'initial' : 'join';
-            const room = await this.networkManager.requestRoom(action, roomSeed ?? undefined);
-            this.selectedRoomSeed = room.seed;
-            this.initializeRoom(room);
-            // The socket can deliver its initial snapshot before room initialization
-            // finishes. Request one more snapshot after the local room is ready.
-            if (this.liveWorld) this.networkManager.requestResync();
-            if (!this.isSpectating) this.cachePhantomsForOffline(room.phantoms);
+
+            try {
+                const room = await this.networkManager.requestRoom(action, roomSeed ?? undefined);
+                this.selectedRoomSeed = room.seed;
+                this.initializeRoom(room);
+                // The socket can deliver its initial snapshot before room initialization
+                // finishes. Request one more snapshot after the local room is ready.
+                if (this.liveWorld) this.networkManager.requestResync();
+                if (!this.isSpectating) this.cachePhantomsForOffline(room.phantoms);
+            } catch (error) {
+                console.warn('[Game] Failed to enter online room, falling back to local game:', error);
+                await this.initializeOfflineRoom();
+            }
         } else {
             // Оффлайн режим — загружаем кэшированные фантомы или генерируем локально
             await this.initializeOfflineRoom();
@@ -484,7 +509,7 @@ export class Game {
         document.body.appendChild(this.spectatorBanner);
     }
 
-    private applyLiveSnapshot(snapshot: any) {
+    private applyLiveSnapshot(snapshot: RoomSnapshot) {
         if (!snapshot || snapshot.seed !== this.currentSeed || !Array.isArray(snapshot.food) || !Array.isArray(snapshot.players)) return;
         const me = this.networkManager.getUser()?.id;
         this.liveEventTicks.clear();
@@ -495,28 +520,28 @@ export class Game {
             ? snapshot.players.find((player: any) => player.entityId === this.localEntityId)
             : snapshot.players.find((player: any) => player.id === me);
         this.localEntityId = localPlayer?.entityId ?? null;
-        if (localPlayer?.segments?.length && localPlayer.direction) {
+        if (!this.localSnakeInitialized && localPlayer?.segments?.length && localPlayer.direction) {
             const direction = new THREE.Vector3(localPlayer.direction.x, localPlayer.direction.y, localPlayer.direction.z);
             const up = new THREE.Vector3(localPlayer.up?.x ?? 0, localPlayer.up?.y ?? 1, localPlayer.up?.z ?? 0);
             this.snake.applyAuthoritativeState(localPlayer.segments.map((position: any) => new THREE.Vector3(position.x, position.y, position.z)), this.orientationQuaternion(direction, up), localPlayer.speed ?? 300);
             this.score = localPlayer.score ?? this.score;
             this.currentSPM = localPlayer.speed ?? this.currentSPM;
-            this.logAction('player.serverTick', {
-                tick: snapshot.tick,
-                entityId: localPlayer.entityId,
-                position: localPlayer.segments[0],
-                direction: localPlayer.direction,
-                score: localPlayer.score,
-            });
+            this.localSnakeInitialized = true;
         }
-        this.liveOpponents = snapshot.players.filter((player: any) => player.entityId && player.entityId !== this.localEntityId).map((player: any) => { this.liveEventTicks.set(player.entityId, snapshot.tick); return this.createLiveOpponent(player, snapshot.tick, snapshot.serverTime); });
+        this.liveOpponents = snapshot.players.filter((player: any) => player.entityId && player.entityId !== this.localEntityId).map((player: any) => { this.liveEventTicks.set(player.entityId, player.lastInputSeq ?? -1); return this.createLiveOpponent(player, snapshot.tick, snapshot.serverTime); });
     }
 
     private createLiveOpponent(player: any, tick = 0, serverTime = Date.now()) {
         const directionVector = new THREE.Vector3(player.direction?.x ?? 0, player.direction?.y ?? 0, player.direction?.z ?? -1).normalize();
         const up = new THREE.Vector3(player.up?.x ?? 0, player.up?.y ?? 1, player.up?.z ?? 0).normalize();
         const direction = this.orientationQuaternion(directionVector, up);
-        return { id: player.entityId ?? player.id, name: player.name ?? 'Player', score: player.score ?? 0, speed: player.speed ?? 300, alive: player.alive !== false, color: player.color ?? '#ffffff', segments: (player.segments ?? []).map((position: any) => new THREE.Vector3(position.x, position.y, position.z)), direction, directionVector, up, elapsed: 0, serverTick: tick, serverTime };
+        const segments = (player.segments ?? []).map((position: any) => new THREE.Vector3(position.x, position.y, position.z));
+        const replay = player.phantom ? this.livePhantomReplays.get(player.id) : undefined;
+        const replayIndex = replay ? replay.trajectoryLog.findIndex(change => {
+            const offset = new THREE.Vector3(change.position.x, change.position.y, change.position.z).sub(segments[0]);
+            return offset.dot(directionVector) >= 0 && offset.cross(directionVector).lengthSq() < 0.01;
+        }) : -1;
+        return { id: player.entityId ?? player.id, name: player.name ?? 'Player', score: player.score ?? 0, speed: player.speed ?? 300, alive: player.alive !== false, color: player.color ?? '#ffffff', segments, direction, directionVector, up, elapsed: 0, serverTick: tick, serverTime, replay, replayIndex: replayIndex < 0 ? 0 : replayIndex };
     }
 
     private orientationQuaternion(direction: THREE.Vector3, up: THREE.Vector3) {
@@ -524,23 +549,63 @@ export class Game {
         return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, direction.clone().negate()));
     }
 
-    private applyLiveDirection(change: any) {
+    private applyLiveDirection(change: PlayerDirectionChanged) {
         const entityId = change?.entityId;
         if (!entityId || !change.direction || !change.up) return;
         if (entityId === this.localEntityId) return;
-        const lastTick = this.liveEventTicks.get(entityId);
-        if (typeof change.tick !== 'number' || (lastTick !== undefined && change.tick < lastTick)) { if (lastTick !== undefined && change.tick < lastTick) this.networkManager.requestResync(); return; }
-        if (this.lastLiveTick !== null && change.tick < this.lastLiveTick) { this.networkManager.requestResync(); return; }
-        if (typeof change.tick === 'number') this.lastLiveTick = Math.max(this.lastLiveTick ?? change.tick, change.tick);
-        this.liveEventTicks.set(entityId, change.tick);
+        const lastSeq = this.liveEventTicks.get(entityId);
+        if (lastSeq !== undefined && change.seq <= lastSeq) return;
+        this.liveEventTicks.set(entityId, change.seq);
         const opponent = this.liveOpponents.find(existing => existing.id === entityId);
         if (!opponent) { this.networkManager.requestResync(); return; }
+        console.log('[Game] Phantom direction change received from server:', change);
         opponent.directionVector.set(change.direction.x, change.direction.y, change.direction.z).normalize();
         opponent.up.set(change.up.x, change.up.y, change.up.z).normalize();
         opponent.direction.copy(this.orientationQuaternion(opponent.directionVector, opponent.up));
         opponent.speed = Math.max(60, change.speed ?? opponent.speed);
-        opponent.serverTick = change.tick;
+        const head = new THREE.Vector3(change.head.x, change.head.y, change.head.z);
+        const offset = head.sub(opponent.segments[0]);
+        if (offset.lengthSq() > 0) for (const segment of opponent.segments) segment.add(offset);
+        opponent.elapsed = 0;
+        opponent.serverTick = change.step;
         opponent.serverTime = change.serverTime ?? Date.now();
+    }
+
+    private applyLiveState(change: PlayerStateChanged) {
+        if (change.entityId === this.localEntityId) return;
+        const opponent = this.liveOpponents.find(existing => existing.id === change.entityId);
+        if (!opponent) { this.networkManager.requestResync(); return; }
+        opponent.segments = change.segments.map(position => new THREE.Vector3(position.x, position.y, position.z));
+        opponent.directionVector.set(change.direction.x, change.direction.y, change.direction.z).normalize();
+        opponent.up.set(change.up.x, change.up.y, change.up.z).normalize();
+        opponent.direction.copy(this.orientationQuaternion(opponent.directionVector, opponent.up));
+        opponent.score = change.score;
+        opponent.speed = Math.max(60, change.speed);
+        opponent.elapsed = 0;
+        opponent.serverTick = change.step;
+        opponent.serverTime = change.serverTime;
+    }
+
+    private livePlayerState(): SnakeState {
+        const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.snake.direction);
+        return {
+            segments: this.snake.segments.map(segment => this.positionData(segment)),
+            direction: this.positionData(direction.round()),
+            up: this.positionData(up.round()),
+            score: this.score,
+            speed: this.input.isActionPressed('boost') ? 1200 : this.currentSPM,
+        };
+    }
+
+    private sendLivePlayerState(reason: 'food' | 'speed' | 'reconnect' | 'spawn') {
+        this.networkManager.sendPlayerState({
+            type: 'state',
+            seq: ++this.localStateSeq,
+            step: this.playerTick,
+            reason,
+            ...this.livePlayerState(),
+        });
     }
 
     private applyLiveFood(change: any) {
@@ -565,30 +630,21 @@ export class Game {
         }
     }
 
-    private applyLiveDeath(death: any) {
+    private applyLiveDeath(death: PlayerDied) {
         const player = death?.player;
         if (!player) return;
         const isLocalPlayer = player.entityId === this.localEntityId;
         this.logAction('player.death', {
-            tick: death.tick,
+            seq: player.lastStateSeq,
             playerId: player.id,
             entityId: player.entityId,
             reason: death.reason ?? 'unknown reason',
             position: death.position,
         });
-        if (typeof death.tick === 'number' && this.lastLiveTick !== null && death.tick < this.lastLiveTick) { this.networkManager.requestResync(); return; }
-        if (typeof death.tick === 'number') this.lastLiveTick = Math.max(this.lastLiveTick ?? death.tick, death.tick);
         if (!isLocalPlayer) {
-            const opponent = this.createLiveOpponent(player, death.tick, death.serverTime);
+            const opponent = this.createLiveOpponent(player, 0, death.serverTime);
             this.liveOpponents = [...this.liveOpponents.filter(existing => existing.id !== player.entityId), opponent];
             return;
-        }
-        if (Array.isArray(player.segments) && player.direction) {
-            const direction = new THREE.Vector3(player.direction.x, player.direction.y, player.direction.z);
-            const up = new THREE.Vector3(player.up?.x ?? 0, player.up?.y ?? 1, player.up?.z ?? 0);
-            this.snake.applyAuthoritativeState(player.segments.map((position: any) => new THREE.Vector3(position.x, position.y, position.z)), this.orientationQuaternion(direction, up), player.speed ?? this.currentSPM);
-            this.score = player.score ?? this.score;
-            this.currentSPM = player.speed ?? this.currentSPM;
         }
         if (!this.isGameOver) void this.handleGameOver();
     }
@@ -599,6 +655,19 @@ export class Game {
         const interval = 60 / Math.max(60, opponent.speed);
         while (opponent.elapsed >= interval) {
             opponent.elapsed -= interval;
+            const liveOpponent = opponent as typeof this.liveOpponents[number];
+            const nextTurn = liveOpponent.replay?.trajectoryLog[liveOpponent.replayIndex];
+            if (nextTurn && this.positionData(liveOpponent.segments[0]).x === nextTurn.position.x && this.positionData(liveOpponent.segments[0]).y === nextTurn.position.y && this.positionData(liveOpponent.segments[0]).z === nextTurn.position.z) {
+                liveOpponent.directionVector.set(nextTurn.direction.x, nextTurn.direction.y, nextTurn.direction.z).normalize();
+                liveOpponent.direction.copy(this.orientationQuaternion(liveOpponent.directionVector, liveOpponent.up));
+                liveOpponent.replayIndex++;
+                this.logAction('phantom.directionChanged', {
+                    replayId: liveOpponent.replay?.id,
+                    position: nextTurn.position,
+                    direction: nextTurn.direction,
+                    source: 'replay',
+                });
+            }
             const tail = opponent.segments.pop()!;
             opponent.segments.unshift(tail.copy(opponent.segments[0]).add(opponent.directionVector));
             this.logAction('phantom.tick', { entityId: opponent.id, tick: ++opponent.serverTick, position: this.positionData(opponent.segments[0]) });
@@ -612,6 +681,8 @@ export class Game {
      * Инициализация комнаты в оффлайн режиме с кэшированными фантомами
      */
     private async initializeOfflineRoom(): Promise<void> {
+        this.liveWorld = false;
+        this.isSpectating = false;
         const localSeed = Math.floor(Math.random() * 1000000);
         const localSpawnIndex = getRandomSpawnIndex();
 
@@ -780,23 +851,22 @@ export class Game {
         }
 
         // Boost
-        if (this.input.isActionPressed('boost')) {
+        const boosting = this.input.isActionPressed('boost');
+        if (boosting) {
             this.snake.setSpeed(0.05);
         } else {
             this.snake.setSpeed(60 / this.currentSPM);
+        }
+        if (this.liveWorld && !this.isSpectating && boosting !== this.wasBoosting) {
+            this.wasBoosting = boosting;
+            this.sendLivePlayerState('speed');
         }
 
         // Logic Update
         if (this.liveWorld) for (const opponent of this.liveOpponents) this.advanceLiveOpponent(opponent, delta);
         const preStepHead = this.snake.getHead().clone();
         if (this.snake.update(delta)) {
-            this.logAction('player.tick', {
-                tick: ++this.playerTick,
-                position: this.positionData(this.snake.getHead()),
-                direction: this.positionData(new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction)),
-                score: this.score,
-                length: this.snake.segments.length,
-            });
+            this.playerTick++;
             // Step occurred - check if we need to record a direction change
             if (this.replayRecorder) {
                 const currentDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction);
@@ -841,6 +911,15 @@ export class Game {
                 }
                 if (phantomStepped && !phantom.isDeadNow()) {
                     const phantomId = phantom.replayPlayer.replayId || `phantom-${this.phantoms.indexOf(phantom)}`;
+                    const directionChange = phantom.consumeDirectionChange();
+                    if (directionChange) {
+                        this.logAction('phantom.directionChanged', {
+                            replayId: phantomId,
+                            position: this.positionData(directionChange.position),
+                            direction: this.positionData(directionChange.direction),
+                            source: 'replay',
+                        });
+                    }
                     const phantomTick = (this.phantomTicks.get(phantomId) ?? 0) + 1;
                     this.phantomTicks.set(phantomId, phantomTick);
                     this.logAction('phantom.tick', {
@@ -995,7 +1074,7 @@ export class Game {
             console.log("Game Over: Bounds");
             this.logAction('player.death', { tick: this.playerTick, reason: 'bounds', position: this.positionData(head) });
             this.particleSystem.emit(head, this.snake.direction, 50, snakeColor);
-            this.handleGameOver();
+            this.handleGameOver('bounds');
             return;
         }
 
@@ -1003,7 +1082,7 @@ export class Game {
             console.log("Game Over: Self");
             this.logAction('player.death', { tick: this.playerTick, reason: 'self-collision', position: this.positionData(head) });
             this.particleSystem.emit(head, this.snake.direction, 50, snakeColor);
-            this.handleGameOver();
+            this.handleGameOver('self-collision');
             return;
         }
 
@@ -1014,7 +1093,7 @@ export class Game {
                         console.log("Game Over: Remote player collision");
                         this.logAction('player.death', { tick: this.playerTick, reason: 'remote-player-collision', position: this.positionData(head), opponentId: opponent.id });
                         this.particleSystem.emit(head, this.snake.direction, 50, new THREE.Color(opponent.color));
-                        this.handleGameOver();
+                        this.handleGameOver('remote-player-collision');
                         return;
                     }
                 }
@@ -1088,6 +1167,7 @@ export class Game {
                 true,
                 this.phantoms.flatMap(phantom => phantom.segments)
             );
+            if (this.liveWorld && !this.isGameOver) this.sendLivePlayerState('food');
         }
     }
 
@@ -1101,7 +1181,7 @@ export class Game {
                 console.log("Game Over: Phantom collision");
                 this.logAction('player.death', { tick: this.playerTick, reason: 'phantom-collision', position: this.positionData(playerHead), phantomId: phantom.replayPlayer.replayId });
                 this.particleSystem.emit(playerHead, this.snake.direction, 50, phantom.phantomColor);
-                void this.handleGameOver();
+                void this.handleGameOver('phantom-collision');
                 return true;
             }
         }
@@ -1151,7 +1231,8 @@ export class Game {
         return false;
     }
 
-    private async handleGameOver() {
+    private async handleGameOver(reason?: string) {
+        if (this.isGameOver) return;
         this.isGameOver = true;
         this.cameraController.triggerShake(0.2, 0.2);
         this.cameraController.setOrbitMode(); // Replaces setGameOverMode
@@ -1163,7 +1244,15 @@ export class Game {
         this.hud.togglePauseButton(false);
         this.hud.setVisibility(false);
 
-        // The room simulation is authoritative online and persists its own result.
+        if (reason && this.liveWorld) this.networkManager.sendPlayerDeath({
+            type: 'death',
+            seq: ++this.localStateSeq,
+            step: this.playerTick,
+            reason,
+            ...this.livePlayerState(),
+        });
+
+        // Online results are persisted only after the local client confirms death.
         if (this.replayRecorder) {
             this.replayRecorder.stop();
             if (!this.networkManager.isConnected()) {
@@ -1218,9 +1307,14 @@ export class Game {
         this.isRoomTransitionPending = true;
         this.gameOverUI.setLoading(true);
         try {
-            const room = this.networkManager.isConnected()
-                ? await this.networkManager.requestRoom(action, this.currentSeed)
-                : null;
+            let room: RoomData | null = null;
+            if (this.networkManager.isConnected()) {
+                try {
+                    room = await this.networkManager.requestRoom(action, this.currentSeed);
+                } catch (error) {
+                    console.warn('[Game] Failed to enter the next online room, falling back to local game:', error);
+                }
+            }
             this.gameOverUI.hide();
         this.pauseUI.hide();
         this.isGameOver = false;

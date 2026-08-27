@@ -2,7 +2,7 @@
 export type Axis = { x: number; y: number; z: number };
 export type FoodKind = 'green' | 'blue' | 'pink';
 export type Food = Axis & { kind: FoodKind };
-export type SimPlayer = { id: string; entityId: string; name: string; segments: Axis[]; direction: Axis; up: Axis; score: number; speed: number; growth: number; alive: boolean; phantom?: boolean; color: string; nextStepAt: number; instanceId?: string; disconnectedAt?: number };
+export type SimPlayer = { id: string; entityId: string; name: string; segments: Axis[]; direction: Axis; up: Axis; score: number; speed: number; growth: number; alive: boolean; phantom?: boolean; color: string; nextStepAt: number; instanceId?: string; disconnectedAt?: number; lastInputSeq?: number; lastStateSeq?: number };
 export type SimulationState = { seed: number; tick: number; food: Food[]; players: Record<string, SimPlayer>; trajectories?: Record<string, Axis[]> };
 export type DeathReason = 'bounds' | 'body' | 'head-to-head';
 export type FoodChange = { removed: Food; added: Food; entityId?: string; score?: number; speed?: number; growth?: number; length?: number };
@@ -36,7 +36,7 @@ export function validInput(current:Axis, next:unknown, _currentUp?:Axis, nextUp?
 function respawn(state:SimulationState,index:number): FoodChange { const removed=clone(state.food[index]), random=rng(state.seed+state.tick*7919+index), occupied=new Set(Object.values(state.players).flatMap(p=>p.segments).map(key));for(let i=0;i<4096;i++){const p={x:Math.floor(random()*51),y:Math.floor(random()*51),z:Math.floor(random()*51)};if(!occupied.has(key(p))&&!state.food.some((f,n)=>n!==index&&same(f,p))){state.food[index]={...p,kind:random()<.5?'blue':random()<.8?'green':'pink'};return {removed,added:clone(state.food[index])};}} return {removed,added:clone(state.food[index])}; }
 
 /** Executes one simultaneous server tick. Tails that leave during this tick are not blockers. */
-export function stepSimulationDelta(state:SimulationState, at:number): SimulationDelta | null {
+export function stepSimulationDelta(state:SimulationState, at:number, allowDeaths=true): SimulationDelta | null {
  const due=Object.values(state.players).filter(p=>p.alive&&p.nextStepAt===at); if(!due.length)return null;
  const heads=new Map(due.map(p=>[p.id,add(p.segments[0],p.direction)]));
  const foodAt=new Map(due.map(p=>[p.id,state.food.findIndex(f=>same(f,heads.get(p.id)!))]));
@@ -46,7 +46,7 @@ export function stepSimulationDelta(state:SimulationState, at:number): Simulatio
  const changed:SimPlayer[]=[], food:FoodChange[]=[], deaths:SimulationDelta['deaths']=[];
  for(const player of due){const head=heads.get(player.id)!; let reason:DeathReason|undefined;
    if(!inBounds(head))reason='bounds'; else if((headCounts.get(key(head))??0)>1)reason='head-to-head'; else if(occupied.has(key(head)))reason='body';
-   if(reason){player.alive=false; player.nextStepAt=at; changed.push(clone(player)); deaths.push({player:clone(player),position:clone(head),reason}); continue;}
+    if(reason&&allowDeaths){player.alive=false; player.nextStepAt=at; changed.push(clone(player)); deaths.push({player:clone(player),position:clone(head),reason}); continue;}
     const foodIndex=foodAt.get(player.id)!; if(foodIndex>=0){const effect=foodEffect(state.food[foodIndex].kind);player.score+=effect.score;player.growth+=effect.growth;player.speed=Math.max(60,player.speed+effect.speed);const replacement=respawn(state,foodIndex);food.push({...replacement,entityId:player.entityId,score:player.score,speed:player.speed,growth:effect.growth,length:player.segments.length+(player.growth>0?1:0)});}
    const keepTail=player.growth>0; if(keepTail)player.growth--; const tail=player.segments[player.segments.length-1]; player.segments=[clone(head),...player.segments.slice(0,keepTail?player.segments.length:player.segments.length-1)]; if(keepTail)player.segments.push(clone(tail)); player.nextStepAt=at+60000/player.speed; changed.push(clone(player));
  }
@@ -54,6 +54,6 @@ export function stepSimulationDelta(state:SimulationState, at:number): Simulatio
 }
 
 /** Builds the simulation to server time, preserving atomicity for equal nextStepAt values. */
-export function advanceSimulation(state:SimulationState, now:number): SimulationDelta[] { const deltas:SimulationDelta[]=[]; for(;;){const due=Object.values(state.players).filter(p=>p.alive&&p.nextStepAt<=now);if(!due.length)break;const at=Math.min(...due.map(p=>p.nextStepAt));const delta=stepSimulationDelta(state,at);if(delta)deltas.push(delta);} return deltas; }
+export function advanceSimulation(state:SimulationState, now:number, allowDeaths=true): SimulationDelta[] { const deltas:SimulationDelta[]=[]; for(;;){const due=Object.values(state.players).filter(p=>p.alive&&p.nextStepAt<=now);if(!due.length)break;const at=Math.min(...due.map(p=>p.nextStepAt));const delta=stepSimulationDelta(state,at,allowDeaths);if(delta)deltas.push(delta);} return deltas; }
 export function stepSimulation(state:SimulationState, now:number) { return advanceSimulation(state,now).length>0; }
 export function chooseLowestPhantom(players: SimPlayer[]) { return players.filter(p=>p.phantom).sort((a,b)=>a.score-b.score||a.id.localeCompare(b.id))[0]; }

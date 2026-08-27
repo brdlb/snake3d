@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { chooseSpawn, parseRoomSeed, rankNextRooms, replayReplacementOrder, ROOM_REPLAYS_QUERY } from './index';
+import { chooseSpawn, parseRoomSeed, rankNextRooms, replayReplacementOrder, ROOM_REPLAYS_QUERY, RoomDurableObject } from './index';
 
 describe('room selection rules', () => {
   it('accepts only a safe integer invitation seed', () => {
@@ -27,14 +27,14 @@ describe('room selection rules', () => {
     expect(new Set(rooms.map(room => room.id))).toEqual(new Set(['a', 'b']));
   });
 
-  it('uses a free spawn and otherwise evicts the lowest-ELO phantom spawn', () => {
+  it('uses a free spawn and otherwise evicts the lowest-score phantom spawn', () => {
     expect(chooseSpawn([{ elo: 1000, startParams: { spawnIndex: 0 } }])).toBeGreaterThanOrEqual(1);
     expect(chooseSpawn([
-      { elo: 1200, startParams: { spawnIndex: 0 } },
-      { elo: 700, startParams: { spawnIndex: 1 } },
-      { elo: 1100, startParams: { spawnIndex: 2 } },
-      { elo: 900, startParams: { spawnIndex: 3 } },
-    ])).toBe(1);
+      { elo: 1200, score: 120, startParams: { spawnIndex: 0 } },
+      { elo: 700, score: 700, startParams: { spawnIndex: 1 } },
+      { elo: 1100, score: 110, startParams: { spawnIndex: 2 } },
+      { elo: 900, score: 900, startParams: { spawnIndex: 3 } },
+    ])).toBe(2);
   });
 
   it('moves restart to another free spawn when one exists', () => {
@@ -44,13 +44,13 @@ describe('room selection rules', () => {
     ], 0)).toBe(1);
   });
 
-  it('always changes spawn on restart when every spawn is occupied', () => {
+  it('replaces the lowest-score spawn when every spawn is occupied', () => {
     expect(chooseSpawn([
-      { elo: 700, startParams: { spawnIndex: 0 } },
-      { elo: 1200, startParams: { spawnIndex: 1 } },
-      { elo: 1100, startParams: { spawnIndex: 2 } },
-      { elo: 1000, startParams: { spawnIndex: 3 } },
-    ], 0)).toBe(3);
+      { elo: 700, score: 700, startParams: { spawnIndex: 0 } },
+      { elo: 1200, score: 1200, startParams: { spawnIndex: 1 } },
+      { elo: 1100, score: 1100, startParams: { spawnIndex: 2 } },
+      { elo: 1000, score: 1000, startParams: { spawnIndex: 3 } },
+    ], 0)).toBe(0);
   });
 
   it('keeps earlier player replays and replaces only the room minimum at capacity', () => {
@@ -67,5 +67,36 @@ describe('room selection rules', () => {
 
   it('keeps the replay query scoped to a room for authoritative terminal records', () => {
     expect(ROOM_REPLAYS_QUERY).toContain('room_seed=?');
+  });
+});
+
+describe('room state preparation', () => {
+  function room() {
+    const storage = { get: vi.fn().mockResolvedValue(null) };
+    const all = vi.fn().mockResolvedValue({ results: [] });
+    const prepare = vi.fn().mockReturnValue({ bind: () => ({ all }) });
+    const object = new RoomDurableObject({ storage, getWebSockets: () => [] } as any, { DB: { prepare } } as any);
+    return { object, prepare, storage };
+  }
+
+  it('loads a realtime state from Durable Object storage without D1', async () => {
+    const { object, prepare, storage } = room();
+
+    await (object as any).loadState(123);
+
+    expect(storage.get).toHaveBeenCalledWith('simulation');
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it('prepares phantoms once and reuses them for subsequent realtime messages', async () => {
+    const { object, prepare } = room();
+
+    await (object as any).liveState(123);
+    expect(prepare).toHaveBeenCalledTimes(2);
+
+    prepare.mockClear();
+    await (object as any).liveState(123);
+
+    expect(prepare).not.toHaveBeenCalled();
   });
 });

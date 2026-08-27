@@ -76,6 +76,16 @@ describe('live room simulation', () => {
     expect(delta.deaths).toMatchObject([{ player: { id: 'a' }, reason: 'bounds', position: { x: 51, y: 1, z: 1 } }]);
   });
 
+  it('keeps advancing an out-of-bounds snake when death is client-confirmed', () => {
+    const state = createSimulation(3);
+    const player = addPlayer(state, 'a', 'A', 0, { segments: [{ x: 50, y: 1, z: 1 }, { x: 49, y: 1, z: 1 }], direction: { x: 1, y: 0, z: 0 } });
+    player.nextStepAt = 1;
+    const [delta] = advanceSimulation(state, 1, false);
+    expect(delta.deaths).toHaveLength(0);
+    expect(player.alive).toBe(true);
+    expect(player.segments[0]).toEqual({ x: 51, y: 1, z: 1 });
+  });
+
   it('handles self and opponent body collisions, but permits a vacating tail', () => {
     const state = createSimulation(4);
     const self = addPlayer(state, 'self', 'Self', 0, { segments: [{x:2,y:2,z:2},{x:2,y:2,z:3},{x:1,y:2,z:3},{x:1,y:2,z:2}], direction: {x:0,y:0,z:1} });
