@@ -99,4 +99,22 @@ describe('room state preparation', () => {
 
     expect(prepare).not.toHaveBeenCalled();
   });
+
+  it('includes a player replay when restart assigned that player another spawn', async () => {
+    const replay = { playerId: 'player-1', startParams: { spawnIndex: 0 } };
+    const prepare = vi.fn((query: string) => ({
+      bind: () =>
+        query === ROOM_REPLAYS_QUERY
+          ? { all: vi.fn().mockResolvedValue({ results: [{ payload_json: JSON.stringify(replay) }] }) }
+          : { first: vi.fn().mockResolvedValue({ spawn_index: 1 }) },
+    }));
+    const object = new RoomDurableObject(
+      { storage: { get: vi.fn() }, getWebSockets: () => [] } as any,
+      { DB: { prepare } } as any,
+    );
+
+    const room = await (object as any).roomData(123, { id: 'player-1' }, true);
+
+    expect(room.phantoms).toEqual([replay]);
+  });
 });
