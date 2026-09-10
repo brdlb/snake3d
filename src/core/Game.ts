@@ -213,6 +213,7 @@ export class Game {
         this.settingsUI.show(); // Show Settings
       },
       () => this.leaderboardUI.show(),
+      (locked) => void this.setOrientationLock(locked),
     );
 
     // Add Pause Button to HUD
@@ -358,10 +359,15 @@ export class Game {
     // Visibility Handler to stop loop when tab is hidden
     this._visibilityHandler = () => {
       if (document.hidden) {
-        if (!this.isPaused && !this.isGameOver && !this.isWaitingForStart) {
+        if (
+          !this.isSpectating &&
+          !this.isPaused &&
+          !this.isGameOver &&
+          !this.isWaitingForStart
+        ) {
           this.togglePause();
+          this.loop.stop();
         }
-        this.loop.stop();
       } else {
         this.loop.start();
       }
@@ -370,7 +376,12 @@ export class Game {
 
     // Blur Handler to pause when window loses focus
     this._blurHandler = () => {
-      if (!this.isPaused && !this.isGameOver && !this.isWaitingForStart) {
+      if (
+        !this.isSpectating &&
+        !this.isPaused &&
+        !this.isGameOver &&
+        !this.isWaitingForStart
+      ) {
         this.togglePause();
       }
     };
@@ -462,14 +473,12 @@ export class Game {
     // Сбрасываем змейку на выбранную точку спауна
     this.snake.reset(spawn.position.clone(), spawn.direction.clone());
 
-    // In an online room, the server snapshot owns phantom entities. Keep the
-    // replay records only for their turns, rather than rendering a duplicate.
-    this.phantoms = this.liveWorld
-      ? []
-      : data.phantoms.map((replayData: ReplayData, index: number) => {
-          this.logAction('phantom.received', { seed: data.seed, index, replay: replayData });
-          return new Phantom(replayData, index);
-        });
+    // Phantoms are fully client-side replay entities. Their recorded input
+    // controls turns, while their food effects are calculated locally.
+    this.phantoms = data.phantoms.map((replayData: ReplayData, index: number) => {
+      this.logAction('phantom.received', { seed: data.seed, index, replay: replayData });
+      return new Phantom(replayData, index);
+    });
 
     // Выводим координаты и направление респавна
     const spawnDir = new THREE.Vector3(0, 0, 1).applyQuaternion(spawn.direction);
@@ -611,7 +620,10 @@ export class Game {
       this.localSnakeInitialized = true;
     }
     this.liveOpponents = snapshot.players
-      .filter((player: any) => player.entityId && player.entityId !== this.localEntityId)
+      .filter(
+        (player: any) =>
+          player.entityId && player.entityId !== this.localEntityId && player.phantom !== true,
+      )
       .map((player: any) => {
         this.liveEventTicks.set(player.entityId, player.lastInputSeq ?? -1);
         return this.createLiveOpponent(player, snapshot.tick, snapshot.serverTime);
@@ -987,6 +999,27 @@ export class Game {
     }
   }
 
+  private async setOrientationLock(locked: boolean) {
+    const orientation = screen.orientation as ScreenOrientation & {
+      lock?: (orientation: 'landscape') => Promise<void>;
+    };
+    if (typeof orientation.lock !== 'function') {
+      this.pauseUI.setOrientationLocked(false);
+      return;
+    }
+
+    try {
+      if (locked) {
+        await orientation.lock('landscape');
+      } else {
+        orientation.unlock();
+      }
+    } catch (error) {
+      console.warn('[Game] Screen orientation lock is unavailable:', error);
+      this.pauseUI.setOrientationLocked(false);
+    }
+  }
+
   private isGameOver: boolean = false;
 
   private update(delta: number) {
@@ -1262,7 +1295,7 @@ export class Game {
       });
     }
 
-    // Online snapshots own the participant list; offline mode keeps replay phantoms.
+    // Live opponents come from the room snapshot; replay phantoms stay client-side.
     if (this.liveWorld)
       for (const opponent of this.liveOpponents) {
         players.push({
@@ -1275,20 +1308,19 @@ export class Game {
           isDead: !opponent.alive,
         });
       }
-    else
-      for (const phantom of this.phantoms) {
-        // Include dead phantoms so they show up as dead in HUD
-        const name = phantom.getPlayerName();
-        players.push({
-          name: name,
-          score: phantom.getScore(),
-          length: phantom.segments.length,
-          speed: phantom.getSPM(),
-          isPlayer: false,
-          color: phantom.getColorHex(),
-          isDead: phantom.isDeadNow(),
-        });
-      }
+    for (const phantom of this.phantoms) {
+      // Include dead phantoms so they show up as dead in HUD.
+      const name = phantom.getPlayerName();
+      players.push({
+        name: name,
+        score: phantom.getScore(),
+        length: phantom.segments.length,
+        speed: phantom.getSPM(),
+        isPlayer: false,
+        color: phantom.getColorHex(),
+        isDead: phantom.isDeadNow(),
+      });
+    }
 
     this.hud.updatePlayers(players);
   }

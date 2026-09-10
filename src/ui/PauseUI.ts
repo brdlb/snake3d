@@ -21,6 +21,7 @@ export class PauseUI {
     private container!: HTMLElement;
     private resumeBtn!: HTMLButtonElement;
     private settingsBtn!: HTMLButtonElement;
+    private orientationLockInput?: HTMLInputElement;
 
     // Stats Elements
     private scoreEl!: HTMLElement;
@@ -37,11 +38,18 @@ export class PauseUI {
     private onResume: () => void;
     private onSettings: () => void;
     private onLeaderboard: () => void;
+    private onOrientationLockChange?: (locked: boolean) => void;
 
-    constructor(onResume: () => void, onSettings: () => void, onLeaderboard: () => void) {
+    constructor(
+        onResume: () => void,
+        onSettings: () => void,
+        onLeaderboard: () => void,
+        onOrientationLockChange?: (locked: boolean) => void,
+    ) {
         this.onResume = onResume;
         this.onSettings = onSettings;
         this.onLeaderboard = onLeaderboard;
+        this.onOrientationLockChange = onOrientationLockChange;
         this.createUI();
     }
 
@@ -112,6 +120,23 @@ export class PauseUI {
         this.container.appendChild(titlePanel);
         this.container.appendChild(statsPanel);
         this.container.appendChild(this.settingsBtn);
+
+        if (this.isMobileDevice()) {
+            const orientationPanel = document.createElement('label');
+            orientationPanel.className = 'pause-panel orientation-lock-panel';
+
+            const orientationText = document.createElement('span');
+            orientationText.textContent = 'LOCK ROTATION';
+
+            this.orientationLockInput = document.createElement('input');
+            this.orientationLockInput.type = 'checkbox';
+            this.orientationLockInput.setAttribute('aria-label', 'Lock screen rotation');
+            this.orientationLockInput.onchange = () =>
+                this.onOrientationLockChange?.(this.orientationLockInput!.checked);
+
+            orientationPanel.append(orientationText, this.orientationLockInput);
+            this.container.appendChild(orientationPanel);
+        }
 
         // Leaderboard Button
         const leadersBtn = document.createElement('button');
@@ -322,6 +347,25 @@ export class PauseUI {
                 border-right-color: #0088ff; /* Blue */
                 padding: 30px 60px;
             }
+
+            .orientation-lock-panel {
+                justify-content: space-between;
+                gap: 32px;
+                min-width: 300px;
+                padding: 18px 60px;
+                border-right-color: #a78bfa;
+                font-family: 'Jura', sans-serif;
+                font-size: 1.1rem;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }
+
+            .orientation-lock-panel input {
+                width: 22px;
+                height: 22px;
+                accent-color: #a78bfa;
+                cursor: pointer;
+            }
             .leaders-btn:hover {
                 color: #0088ff;
             }
@@ -338,6 +382,11 @@ export class PauseUI {
                 .menu-btn {
                     font-size: 1rem;
                     padding: 20px 30px;
+                }
+                .orientation-lock-panel {
+                    min-width: 0;
+                    padding: 15px 30px;
+                    font-size: 0.85rem;
                 }
             }
         `;
@@ -359,6 +408,15 @@ export class PauseUI {
     public updateRoom(seed: number) {
         this.roomSeed = seed;
         this.roomEl.textContent = `You exist in room ${seed}`;
+    }
+
+    public setOrientationLocked(locked: boolean) {
+        if (this.orientationLockInput) this.orientationLockInput.checked = locked;
+    }
+
+    private isMobileDevice(): boolean {
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+            (navigator.maxTouchPoints > 1 && window.matchMedia('(pointer: coarse)').matches);
     }
 
     private async copyRoomLink() {
