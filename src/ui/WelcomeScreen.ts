@@ -186,7 +186,6 @@ export class WelcomeScreen {
     }
 
     private async deleteRoom(room: RoomSummary, row: HTMLDivElement): Promise<void> {
-        if (!window.confirm(`Delete room ${room.seed} and all its results?`)) return;
         const buttons = row.querySelectorAll<HTMLButtonElement>('button');
         buttons.forEach((button) => { button.disabled = true; });
         try {
