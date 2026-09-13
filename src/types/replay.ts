@@ -48,6 +48,12 @@ export interface RoomData {
     playerSpawn?: { position: Vec3; direction: Vec3; up: Vec3 };
 }
 
+export interface RoomSummary {
+    seed: number;
+    gamesPlayed: number;
+    bestScores: Array<number | null>;
+}
+
 // Payload для отправки результата игры на сервер
 export interface GameOverPayload {
     seed: number;

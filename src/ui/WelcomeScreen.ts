@@ -3,18 +3,20 @@
  * Required for audio initialization via user click
  */
 import { networkManager } from '../network/NetworkManager';
+import type { RoomSummary } from '../types/replay';
 
 export class WelcomeScreen {
     private container: HTMLDivElement;
-    private onStart: (mode: 'player' | 'spectator') => void | Promise<void>;
+    private onStart: (mode: 'player' | 'spectator', roomSeed?: number) => void | Promise<void>;
     private readonly invitedRoomSeed: number | null;
 
-    constructor(onStart: (mode: 'player' | 'spectator') => void | Promise<void>) {
+    constructor(onStart: (mode: 'player' | 'spectator', roomSeed?: number) => void | Promise<void>) {
         this.onStart = onStart;
         const room = new URLSearchParams(window.location.search).get('room');
         this.invitedRoomSeed = room !== null && /^\d+$/.test(room) && Number.isSafeInteger(Number(room)) ? Number(room) : null;
         this.container = this.createUI();
         document.body.appendChild(this.container);
+        if (this.invitedRoomSeed === null) void this.loadRooms();
     }
 
     private createUI(): HTMLDivElement {
@@ -66,68 +68,20 @@ export class WelcomeScreen {
             return container;
         }
 
-        // High Score
-        const user = networkManager.getUser();
-        if (user && (user.highScore || 0) > 0) {
-            const scoreDisplay = document.createElement('div');
-            scoreDisplay.className = 'welcome-high-score';
-            scoreDisplay.innerHTML = `
-                <span class="label">YOUR RECORD:</span>
-                <span class="value">${user.highScore}</span>
-            `;
-            content.appendChild(scoreDisplay);
-        }
-
-        // Controls section
-        const controlsSection = document.createElement('div');
-        controlsSection.className = 'welcome-controls';
-
-        const controlsTitle = document.createElement('h2');
-        controlsTitle.className = 'controls-title';
-        controlsTitle.textContent = 'Controls';
-        controlsSection.appendChild(controlsTitle);
-
-        const controlsList = document.createElement('div');
-        controlsList.className = 'controls-list';
-
-        // Desktop controls
-        const desktopControls = document.createElement('div');
-        desktopControls.className = 'controls-group';
-        desktopControls.innerHTML = `
-            <div class="controls-group-title">Desktop</div>
-            <div class="control-item">
-                <span class="control-key">A / D</span>
-                <span class="control-desc">Turn left / right</span>
+        const roomsSection = document.createElement('section');
+        roomsSection.className = 'welcome-rooms';
+        roomsSection.innerHTML = `
+            <h2 class="rooms-title">SELECT ROOM</h2>
+            <div class="rooms-columns" aria-hidden="true">
+                <span>ROOM</span>
+                <span>GAMES</span>
+                <span>BEST BY RESPAWN SLOT</span>
             </div>
-            <div class="control-item">
-                <span class="control-key">Q / E</span>
-                <span class="control-desc">Roll left / right</span>
-            </div>
-            <div class="control-item">
-                <span class="control-key">SPACE</span>
-                <span class="control-desc">Speed boost</span>
+            <div class="rooms-list" aria-live="polite">
+                <div class="rooms-message">LOADING ROOMS…</div>
             </div>
         `;
-        controlsList.appendChild(desktopControls);
-
-        // Mobile controls
-        const mobileControls = document.createElement('div');
-        mobileControls.className = 'controls-group';
-        mobileControls.innerHTML = `
-            <div class="controls-group-title">Mobile</div>
-            <div class="control-item">
-                <span class="control-key">Swipe</span>
-                <span class="control-desc">Horizontal — turn</span>
-            </div>
-            <div class="control-item">
-                <span class="control-key">Swipe</span>
-                <span class="control-desc">Vertical — roll</span>
-            </div>
-        `;
-        controlsList.appendChild(mobileControls);
-
-        controlsSection.appendChild(controlsList);
-        content.appendChild(controlsSection);
+        content.appendChild(roomsSection);
 
         // Headphones recommendation
         const headphonesSection = document.createElement('div');
@@ -141,33 +95,80 @@ export class WelcomeScreen {
         `;
         content.appendChild(headphonesSection);
 
-        // Start button
-        const startButton = document.createElement('button');
-        startButton.type = 'button';
-        startButton.className = 'start-btn';
-        startButton.innerHTML = `
-            <span class="start-btn-text">START</span>
-            <span class="start-btn-icon">▶</span>
-        `;
-        startButton.addEventListener('click', (event) => {
-            event.preventDefault();
-            void this.handleStart('player');
-        });
-        content.appendChild(startButton);
-
         container.appendChild(content);
 
         return container;
     }
 
-    private async handleStart(mode: 'player' | 'spectator'): Promise<void> {
+    private async loadRooms(): Promise<void> {
+        const list = this.container.querySelector<HTMLDivElement>('.rooms-list');
+        if (!list) return;
+        try {
+            const rooms = await networkManager.requestRooms();
+            list.replaceChildren();
+            if (rooms.length === 0) {
+                list.appendChild(this.createFallbackButton('CREATE FIRST ROOM'));
+                return;
+            }
+            rooms.forEach((room) => list.appendChild(this.createRoomButton(room)));
+        } catch (error) {
+            console.warn('[Welcome] Unable to load rooms:', error);
+            list.replaceChildren(this.createFallbackButton('START OFFLINE'));
+        }
+    }
+
+    private createRoomButton(room: RoomSummary): HTMLButtonElement {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'room-row';
+        button.setAttribute('aria-label', `Enter room ${room.seed}`);
+
+        const seed = document.createElement('span');
+        seed.className = 'room-seed';
+        seed.textContent = `#${room.seed}`;
+
+        const games = document.createElement('span');
+        games.className = 'room-games';
+        games.textContent = String(room.gamesPlayed);
+
+        const scores = document.createElement('span');
+        scores.className = 'room-scores';
+        room.bestScores.forEach((score, index) => {
+            const slot = document.createElement('span');
+            slot.className = 'room-score';
+            const number = document.createElement('small');
+            number.textContent = String(index + 1);
+            const value = document.createElement('strong');
+            value.textContent = score === null ? '—' : String(score);
+            slot.append(number, value);
+            scores.appendChild(slot);
+        });
+
+        const arrow = document.createElement('span');
+        arrow.className = 'room-enter';
+        arrow.textContent = '▶';
+        button.append(seed, games, scores, arrow);
+        button.addEventListener('click', () => void this.handleStart('player', room.seed));
+        return button;
+    }
+
+    private createFallbackButton(label: string): HTMLButtonElement {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'room-fallback';
+        button.textContent = label;
+        button.addEventListener('click', () => void this.handleStart('player'));
+        return button;
+    }
+
+    private async handleStart(mode: 'player' | 'spectator', roomSeed?: number): Promise<void> {
         this.container.classList.remove('active');
         this.container.classList.add('hiding');
 
         // Wait for animation to complete
         await new Promise<void>(resolve => setTimeout(resolve, 600));
         try {
-            await this.onStart(mode);
+            await this.onStart(mode, roomSeed);
             this.container.remove();
         } catch (error) {
             console.error('[Welcome] Unable to enter the room', error);

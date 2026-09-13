@@ -246,6 +246,18 @@ export const ROOM_REPLAYS_QUERY = `SELECT payload_json FROM (
   WHERE room_seed=?
 ) WHERE spawn_rank=1`;
 
+export const ROOM_LIST_QUERY = `SELECT
+  r.seed AS seed,
+  r.total_games_played AS gamesPlayed,
+  MAX(CASE WHEN s.spawn_index = 0 THEN s.best_score END) AS spawn0,
+  MAX(CASE WHEN s.spawn_index = 1 THEN s.best_score END) AS spawn1,
+  MAX(CASE WHEN s.spawn_index = 2 THEN s.best_score END) AS spawn2,
+  MAX(CASE WHEN s.spawn_index = 3 THEN s.best_score END) AS spawn3
+FROM rooms r
+LEFT JOIN room_spawn_records s ON s.room_seed = r.seed
+GROUP BY r.seed, r.total_games_played
+ORDER BY r.updated_at DESC, r.seed ASC`;
+
 export default {
   async fetch(request, env): Promise<Response> {
     const requestId = crypto.randomUUID(),
@@ -313,6 +325,27 @@ export default {
         .bind(JSON.stringify(next), now(), user.id)
         .run();
       return json({ user: { ...user, settings: next } }, 200, requestId);
+    }
+    if (path === '/api/v1/rooms' && request.method === 'GET') {
+      const rows = await env.DB.prepare(ROOM_LIST_QUERY).all<{
+        seed: number;
+        gamesPlayed: number;
+        spawn0: number | null;
+        spawn1: number | null;
+        spawn2: number | null;
+        spawn3: number | null;
+      }>();
+      return json(
+        rows.results.map((row) => ({
+          seed: Number(row.seed),
+          gamesPlayed: Number(row.gamesPlayed),
+          bestScores: [row.spawn0, row.spawn1, row.spawn2, row.spawn3].map((score) =>
+            score === null ? null : Number(score),
+          ),
+        })),
+        200,
+        requestId,
+      );
     }
     if (path === '/api/v1/matches' && request.method === 'POST') {
       const data = await body(request, requestId);
@@ -790,6 +823,12 @@ export class RoomDurableObject {
         'UPDATE rooms SET total_games_played=total_games_played+1,updated_at=? WHERE seed=?',
       ).bind(time, seed),
       this.env.DB.prepare(
+        `INSERT INTO room_spawn_records(room_seed,spawn_index,best_score,updated_at) VALUES(?,?,?,?)
+         ON CONFLICT(room_seed,spawn_index) DO UPDATE SET
+           best_score=MAX(best_score,excluded.best_score),
+           updated_at=CASE WHEN excluded.best_score>best_score THEN excluded.updated_at ELSE updated_at END`,
+      ).bind(seed, terminal.trajectory.spawnIndex, score, time),
+      this.env.DB.prepare(
         'UPDATE users SET games_played=games_played+1,total_score=total_score+?,high_score=CASE WHEN ?>high_score THEN ? ELSE high_score END,high_score_seed=CASE WHEN ?>high_score THEN ? ELSE high_score_seed END,high_score_replay_id=CASE WHEN ?>high_score THEN ? ELSE high_score_replay_id END,high_score_date=CASE WHEN ?>high_score THEN ? ELSE high_score_date END,elo=CASE WHEN ?>high_score THEN ? ELSE elo END,last_seen=? WHERE id=?',
       ).bind(score, score, score, score, seed, score, id, score, time, score, score, time, user.id),
       this.env.DB.prepare(
@@ -879,6 +918,12 @@ export class RoomDurableObject {
       this.env.DB.prepare(
         'UPDATE rooms SET total_games_played=total_games_played+1,updated_at=? WHERE seed=?',
       ).bind(time, seed),
+      this.env.DB.prepare(
+        `INSERT INTO room_spawn_records(room_seed,spawn_index,best_score,updated_at) VALUES(?,?,?,?)
+         ON CONFLICT(room_seed,spawn_index) DO UPDATE SET
+           best_score=MAX(best_score,excluded.best_score),
+           updated_at=CASE WHEN excluded.best_score>best_score THEN excluded.updated_at ELSE updated_at END`,
+      ).bind(seed, terminal.trajectory.spawnIndex, score, time),
       this.env.DB.prepare(
         'UPDATE users SET games_played=games_played+1,total_score=total_score+?,high_score=CASE WHEN ?>high_score THEN ? ELSE high_score END,high_score_seed=CASE WHEN ?>high_score THEN ? ELSE high_score_seed END,high_score_replay_id=CASE WHEN ?>high_score THEN ? ELSE high_score_replay_id END,high_score_date=CASE WHEN ?>high_score THEN ? ELSE high_score_date END,elo=CASE WHEN ?>high_score THEN ? ELSE elo END,last_seen=? WHERE id=?',
       ).bind(score, score, score, score, seed, score, id, score, time, score, score, time, user.id),

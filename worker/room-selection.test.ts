@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { chooseSpawn, parseRoomSeed, rankNextRooms, replayReplacementOrder, ROOM_REPLAYS_QUERY, RoomDurableObject } from './index';
+import { chooseSpawn, parseRoomSeed, rankNextRooms, replayReplacementOrder, ROOM_LIST_QUERY, ROOM_REPLAYS_QUERY, RoomDurableObject } from './index';
 
 describe('room selection rules', () => {
   it('accepts only a safe integer invitation seed', () => {
@@ -67,6 +67,13 @@ describe('room selection rules', () => {
 
   it('keeps the replay query scoped to a room for authoritative terminal records', () => {
     expect(ROOM_REPLAYS_QUERY).toContain('room_seed=?');
+  });
+
+  it('lists room play counts and the best score for every spawn', () => {
+    expect(ROOM_LIST_QUERY).toContain('r.total_games_played AS gamesPlayed');
+    expect(ROOM_LIST_QUERY).toContain('room_spawn_records');
+    expect(ROOM_LIST_QUERY.match(/MAX\(CASE/g)).toHaveLength(4);
+    expect(ROOM_LIST_QUERY).toContain('GROUP BY r.seed');
   });
 });
 

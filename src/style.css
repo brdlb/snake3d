@@ -516,6 +516,26 @@ body {
   font-family: 'Menlo', monospace;
 }
 
+.welcome-rooms { margin: 18px 0 24px; text-align: left; }
+.rooms-title { margin: 0 0 12px; color: #888; font-family: 'Jura', system-ui, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 1.8px; text-align: center; }
+.rooms-columns, .room-row { display: grid; grid-template-columns: minmax(88px, 1fr) 58px minmax(190px, 2fr) 16px; align-items: center; gap: 12px; }
+.rooms-columns { padding: 0 14px 7px; color: #5f636b; font-size: 9px; letter-spacing: 1px; }
+.rooms-columns span:nth-child(2) { text-align: center; }
+.rooms-list { max-height: min(42vh, 330px); overflow-y: auto; border: 1px solid rgba(255, 255, 255, 0.09); scrollbar-color: #444 #080808; }
+.room-row { width: 100%; min-height: 60px; padding: 10px 14px; color: #dfe5ed; background: rgba(255, 255, 255, 0.025); border: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); font: inherit; text-align: left; cursor: pointer; transition: background 0.15s ease, color 0.15s ease; }
+.room-row:last-child { border-bottom: 0; }
+.room-row:hover, .room-row:focus-visible { color: #fff; background: rgba(0, 210, 255, 0.1); outline: 1px solid rgba(0, 210, 255, 0.45); outline-offset: -1px; }
+.room-seed { overflow: hidden; font-family: 'Menlo', monospace; font-size: 12px; text-overflow: ellipsis; }
+.room-games { color: #fff; font-family: 'Menlo', monospace; text-align: center; }
+.room-scores { display: grid; grid-template-columns: repeat(4, minmax(34px, 1fr)); gap: 5px; }
+.room-score { display: flex; flex-direction: column; align-items: center; padding: 4px 2px; background: rgba(255, 255, 255, 0.055); }
+.room-score small { color: #626873; font-size: 8px; }
+.room-score strong { color: #dce4eb; font-family: 'Menlo', monospace; font-size: 11px; font-weight: 600; }
+.room-enter { color: #00c7ef; font-size: 10px; }
+.rooms-message, .room-fallback { width: 100%; padding: 24px 16px; color: #777; background: rgba(255, 255, 255, 0.025); border: 0; font-family: 'Jura', system-ui, sans-serif; font-size: 11px; letter-spacing: 1.5px; text-align: center; }
+.room-fallback { color: #dce4eb; cursor: pointer; }
+.room-fallback:hover, .room-fallback:focus-visible { background: rgba(0, 210, 255, 0.1); outline: 1px solid rgba(0, 210, 255, 0.45); outline-offset: -1px; }
+
 .welcome-controls {
   margin-bottom: 24px;
 }
@@ -661,6 +681,21 @@ body {
 
   .controls-group {
     min-width: auto;
+  }
+
+  .rooms-columns,
+  .room-row {
+    grid-template-columns: 72px 42px minmax(148px, 1fr) 10px;
+    gap: 7px;
+  }
+
+  .rooms-columns {
+    padding-inline: 9px;
+    font-size: 8px;
+  }
+
+  .room-row {
+    padding-inline: 9px;
   }
 
   .headphones-section {

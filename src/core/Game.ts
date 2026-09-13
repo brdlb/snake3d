@@ -397,7 +397,7 @@ export class Game {
     this.loop.start();
 
     // Welcome Screen - показываем приветственный экран
-    this.welcomeScreen = new WelcomeScreen((mode) => this.handleGameStart(mode));
+    this.welcomeScreen = new WelcomeScreen((mode, roomSeed) => this.handleGameStart(mode, roomSeed));
     if (new URLSearchParams(window.location.search).get('room') === null) {
       this.initialSpectatorPromise = this.handleGameStart('spectator');
     }
@@ -514,7 +514,10 @@ export class Game {
    * Обработчик нажатия кнопки "Старт" на приветственном экране
    * Инициализирует аудио и запускает игру
    */
-  private async handleGameStart(mode: 'player' | 'spectator' = 'player'): Promise<void> {
+  private async handleGameStart(
+    mode: 'player' | 'spectator' = 'player',
+    selectedRoomSeed?: number,
+  ): Promise<void> {
     if (mode === 'player' && this.initialSpectatorPromise && this.selectedRoomSeed === null) {
       await this.initialSpectatorPromise.catch(() => undefined);
     }
@@ -527,7 +530,7 @@ export class Game {
       const requestedSeed = new URLSearchParams(window.location.search).get('room');
       const invitedSeed =
         requestedSeed !== null && /^\d+$/.test(requestedSeed) ? Number(requestedSeed) : null;
-      const roomSeed = invitedSeed ?? (this.isSpectating ? null : this.selectedRoomSeed);
+      const roomSeed = selectedRoomSeed ?? invitedSeed ?? (this.isSpectating ? null : this.selectedRoomSeed);
       const action = this.isSpectating ? 'spectate' : roomSeed === null ? 'initial' : 'join';
 
       try {
