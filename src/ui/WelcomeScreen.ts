@@ -71,7 +71,10 @@ export class WelcomeScreen {
         const roomsSection = document.createElement('section');
         roomsSection.className = 'welcome-rooms';
         roomsSection.innerHTML = `
-            <h2 class="rooms-title">SELECT ROOM</h2>
+            <div class="rooms-heading">
+                <h2 class="rooms-title">SELECT ROOM</h2>
+                <button type="button" class="room-create">+ NEW ROOM</button>
+            </div>
             <div class="rooms-columns" aria-hidden="true">
                 <span>ROOM</span>
                 <span>GAMES</span>
@@ -81,6 +84,8 @@ export class WelcomeScreen {
                 <div class="rooms-message">LOADING ROOMS…</div>
             </div>
         `;
+        roomsSection.querySelector<HTMLButtonElement>('.room-create')
+            ?.addEventListener('click', () => void this.createRoom());
         content.appendChild(roomsSection);
 
         // Headphones recommendation
@@ -107,7 +112,10 @@ export class WelcomeScreen {
             const rooms = await networkManager.requestRooms();
             list.replaceChildren();
             if (rooms.length === 0) {
-                list.appendChild(this.createFallbackButton('CREATE FIRST ROOM'));
+                const message = document.createElement('div');
+                message.className = 'rooms-message';
+                message.textContent = 'NO ROOMS YET';
+                list.appendChild(message);
                 return;
             }
             rooms.forEach((room) => list.appendChild(this.createRoomButton(room)));
@@ -117,10 +125,12 @@ export class WelcomeScreen {
         }
     }
 
-    private createRoomButton(room: RoomSummary): HTMLButtonElement {
+    private createRoomButton(room: RoomSummary): HTMLDivElement {
+        const row = document.createElement('div');
+        row.className = 'room-row';
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = 'room-row';
+        button.className = 'room-open';
         button.setAttribute('aria-label', `Enter room ${room.seed}`);
 
         const seed = document.createElement('span');
@@ -149,7 +159,51 @@ export class WelcomeScreen {
         arrow.textContent = '▶';
         button.append(seed, games, scores, arrow);
         button.addEventListener('click', () => void this.handleStart('player', room.seed));
-        return button;
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'room-delete';
+        remove.textContent = '×';
+        remove.title = `Delete room ${room.seed}`;
+        remove.setAttribute('aria-label', `Delete room ${room.seed}`);
+        remove.addEventListener('click', () => void this.deleteRoom(room, row));
+        row.append(button, remove);
+        return row;
+    }
+
+    private async createRoom(): Promise<void> {
+        const button = this.container.querySelector<HTMLButtonElement>('.room-create');
+        if (!button || button.disabled) return;
+        button.disabled = true;
+        try {
+            const room = await networkManager.createRoom();
+            await this.handleStart('player', room.seed);
+        } catch (error) {
+            console.error('[Welcome] Unable to create room:', error);
+            this.showStartError('Unable to create a room. Please try again.');
+            button.disabled = false;
+        }
+    }
+
+    private async deleteRoom(room: RoomSummary, row: HTMLDivElement): Promise<void> {
+        if (!window.confirm(`Delete room ${room.seed} and all its results?`)) return;
+        const buttons = row.querySelectorAll<HTMLButtonElement>('button');
+        buttons.forEach((button) => { button.disabled = true; });
+        try {
+            await networkManager.deleteRoom(room.seed);
+            row.remove();
+            const list = this.container.querySelector<HTMLDivElement>('.rooms-list');
+            if (list && !list.querySelector('.room-row')) {
+                const message = document.createElement('div');
+                message.className = 'rooms-message';
+                message.textContent = 'NO ROOMS YET';
+                list.appendChild(message);
+            }
+        } catch (error) {
+            console.error('[Welcome] Unable to delete room:', error);
+            this.showStartError('Unable to delete this room. Please try again.');
+            buttons.forEach((button) => { button.disabled = false; });
+        }
     }
 
     private createFallbackButton(label: string): HTMLButtonElement {

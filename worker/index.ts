@@ -189,6 +189,18 @@ const roomActions = new Set<RoomAction>([
   'spectate',
 ]);
 const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] & 0x7fffffff;
+async function createRoomSeed(env: Env, user: User) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const seed = randomSeed(),
+      result = await env.DB.prepare(
+        'INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)',
+      )
+        .bind(seed, Math.floor(user.elo / 100), now())
+        .run();
+    if (result.meta.changes === 1) return seed;
+  }
+  throw new Error('ROOM_SEED_COLLISION');
+}
 export function parseRoomSeed(value: string | null) {
   if (value === null || !/^\d+$/.test(value)) return null;
   const seed = Number(value);
@@ -348,6 +360,30 @@ export default {
         requestId,
       );
     }
+    if (path === '/api/v1/rooms' && request.method === 'POST') {
+      return json({ seed: await createRoomSeed(env, user) }, 201, requestId);
+    }
+    const roomResource = path.match(/^\/api\/v1\/rooms\/(\d+)$/);
+    if (roomResource && request.method === 'DELETE') {
+      const seed = Number(roomResource[1]);
+      const exists = await env.DB.prepare('SELECT 1 FROM rooms WHERE seed=?').bind(seed).first();
+      if (!exists) return fail('ROOM_NOT_FOUND', 404, requestId);
+      await env.ROOMS.get(env.ROOMS.idFromName(String(seed))).fetch('https://room/delete', {
+        method: 'POST',
+      });
+      await env.DB.batch([
+        env.DB.prepare('UPDATE users SET last_room_seed=NULL WHERE last_room_seed=?').bind(seed),
+        env.DB.prepare('DELETE FROM live_room_assignments WHERE room_seed=?').bind(seed),
+        env.DB.prepare('DELETE FROM room_assignments WHERE room_seed=?').bind(seed),
+        env.DB.prepare('DELETE FROM room_players WHERE room_seed=?').bind(seed),
+        env.DB.prepare('DELETE FROM user_room_visits WHERE room_seed=?').bind(seed),
+        env.DB.prepare('DELETE FROM room_spawn_records WHERE room_seed=?').bind(seed),
+        env.DB.prepare('DELETE FROM game_submissions WHERE room_seed=?').bind(seed),
+        env.DB.prepare('DELETE FROM replays WHERE room_seed=?').bind(seed),
+        env.DB.prepare('DELETE FROM rooms WHERE seed=?').bind(seed),
+      ]);
+      return json({ deleted: true, seed }, 200, requestId);
+    }
     if (path === '/api/v1/matches' && request.method === 'POST') {
       const data = await body(request, requestId);
       if (data instanceof Response) return data;
@@ -485,6 +521,13 @@ export class RoomDurableObject {
         this.restartUserId = (JSON.parse(request.headers.get('x-user') || '{}') as User).id;
       return this.socket(request);
     }
+    if (path === '/delete') {
+      for (const socket of this.ctx.getWebSockets()) socket.close(1001, 'Room deleted');
+      this.simulation = null;
+      this.restartUserId = null;
+      await this.ctx.storage.deleteAll();
+      return new Response(null, { status: 204 });
+    }
     const data = await request.json<any>();
     return path === '/assign'
       ? this.assign(data)
@@ -569,16 +612,7 @@ export class RoomDurableObject {
     return state;
   }
   private async createRoom(user: User) {
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const seed = randomSeed(),
-        result = await this.env.DB.prepare(
-          'INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)',
-        )
-          .bind(seed, Math.floor(user.elo / 100), now())
-          .run();
-      if (result.meta.changes === 1) return seed;
-    }
-    throw new Error('ROOM_SEED_COLLISION');
+    return createRoomSeed(this.env, user);
   }
   private async activeReplays(seed: number, excludePlayerId?: string) {
     const replays = await this.env.DB.prepare(ROOM_REPLAYS_QUERY)

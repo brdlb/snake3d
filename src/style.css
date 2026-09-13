@@ -535,6 +535,18 @@ body {
 .rooms-message, .room-fallback { width: 100%; padding: 24px 16px; color: #777; background: rgba(255, 255, 255, 0.025); border: 0; font-family: 'Jura', system-ui, sans-serif; font-size: 11px; letter-spacing: 1.5px; text-align: center; }
 .room-fallback { color: #dce4eb; cursor: pointer; }
 .room-fallback:hover, .room-fallback:focus-visible { background: rgba(0, 210, 255, 0.1); outline: 1px solid rgba(0, 210, 255, 0.45); outline-offset: -1px; }
+.rooms-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.rooms-heading .rooms-title { margin: 0; }
+.room-create { padding: 6px 10px; color: #00c7ef; background: transparent; border: 1px solid rgba(0, 199, 239, 0.4); font-family: 'Jura', system-ui, sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 1px; cursor: pointer; }
+.room-create:hover, .room-create:focus-visible { background: rgba(0, 210, 255, 0.1); outline: none; border-color: #00c7ef; }
+.room-create:disabled { opacity: 0.45; cursor: wait; }
+.room-row { display: flex; min-height: 60px; padding: 0; gap: 0; }
+.room-open { display: grid; grid-template-columns: minmax(88px, 1fr) 58px minmax(190px, 2fr) 16px; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 10px 14px; color: inherit; background: transparent; border: 0; font: inherit; text-align: left; cursor: pointer; }
+.room-row:hover, .room-row:focus-within { background: rgba(0, 210, 255, 0.1); outline: 1px solid rgba(0, 210, 255, 0.45); outline-offset: -1px; }
+.room-open:focus-visible { outline: none; }
+.room-delete { flex: 0 0 42px; color: #85646a; background: transparent; border: 0; border-left: 1px solid rgba(255, 255, 255, 0.07); font: 22px/1 'Menlo', monospace; cursor: pointer; }
+.room-delete:hover, .room-delete:focus-visible { color: #ff6b81; background: rgba(255, 80, 105, 0.12); outline: none; }
+.room-open:disabled, .room-delete:disabled { opacity: 0.4; cursor: wait; }
 
 .welcome-controls {
   margin-bottom: 24px;
@@ -684,7 +696,7 @@ body {
   }
 
   .rooms-columns,
-  .room-row {
+  .room-open {
     grid-template-columns: 72px 42px minmax(148px, 1fr) 10px;
     gap: 7px;
   }
@@ -694,7 +706,7 @@ body {
     font-size: 8px;
   }
 
-  .room-row {
+  .room-open {
     padding-inline: 9px;
   }
 
