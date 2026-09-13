@@ -30,6 +30,7 @@ import type {
   RoomSnapshot,
   SnakeState,
 } from '../../shared/realtime';
+import { findLocalPlayer, isLiveOpponent } from './livePlayers';
 
 interface Pulse {
   color: THREE.Color;
@@ -627,9 +628,7 @@ export class Game {
               : FOOD_COLORS.BLUE,
         ),
     );
-    const localPlayer = this.localEntityId
-      ? snapshot.players.find((player: any) => player.entityId === this.localEntityId)
-      : snapshot.players.find((player: any) => player.id === me);
+    const localPlayer = findLocalPlayer(snapshot.players, this.localEntityId, me);
     this.localEntityId = localPlayer?.entityId ?? null;
     if (!this.localSnakeInitialized && localPlayer?.segments?.length && localPlayer.direction) {
       const direction = new THREE.Vector3(
@@ -654,10 +653,7 @@ export class Game {
       this.localSnakeInitialized = true;
     }
     this.liveOpponents = snapshot.players
-      .filter(
-        (player: any) =>
-          player.entityId && player.entityId !== this.localEntityId && player.phantom !== true,
-      )
+      .filter((player: any) => isLiveOpponent(player, this.localEntityId, me))
       .map((player: any) => {
         this.liveEventTicks.set(player.entityId, player.lastInputSeq ?? -1);
         return this.createLiveOpponent(player, snapshot.tick, snapshot.serverTime);
