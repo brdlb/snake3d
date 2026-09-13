@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { chooseSpawn, parseRoomSeed, rankNextRooms, replayReplacementOrder, ROOM_LIST_QUERY, ROOM_REPLAYS_QUERY, RoomDurableObject } from './index';
+import { addPlayer, createSimulation } from '../shared/simulation';
 
 describe('room selection rules', () => {
   it('accepts only a safe integer invitation seed', () => {
@@ -161,5 +162,39 @@ describe('room state preparation', () => {
       statements.find((statement) => statement.query.startsWith('INSERT INTO room_assignments'))
         ?.args[2],
     ).toBe(3);
+  });
+
+  it('persists the actual safe spawn selected around a live player', async () => {
+    const state = createSimulation(123);
+    addPlayer(state, 'online-player', 'Online', 0, { spawnIndex: 0 });
+    const statements: Array<{ query: string; args: unknown[] }> = [];
+    const prepare = vi.fn((query: string) => ({
+      bind: (...args: unknown[]) =>
+        query === 'SELECT 1 FROM rooms WHERE seed=?'
+          ? { first: vi.fn().mockResolvedValue({ 1: 1 }) }
+          : { query, args },
+    }));
+    const object = new RoomDurableObject(
+      { storage: { put: vi.fn() }, getWebSockets: () => [] } as any,
+      { DB: { prepare, batch: vi.fn(async (batch) => statements.push(...batch)) } } as any,
+    );
+    vi.spyOn(object as any, 'prepareState').mockResolvedValue(state);
+    vi.spyOn(object as any, 'activeReplays').mockResolvedValue({ results: [] });
+    vi.spyOn(object as any, 'roomData').mockImplementation(async () => {
+      const player = Object.values(state.players).find((candidate) => candidate.id === 'joining-player');
+      return { seed: 123, phantoms: [], playerSpawnIndex: player?.spawnIndex };
+    });
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0);
+
+    const response = await (object as any).join({
+      seed: 123,
+      user: { id: 'joining-player', username: 'Joining', elo: 1000 },
+    });
+
+    expect(await response.json()).toMatchObject({ playerSpawnIndex: 1 });
+    expect(
+      statements.find((statement) => statement.query.startsWith('INSERT INTO room_assignments'))
+        ?.args[2],
+    ).toBe(1);
   });
 });

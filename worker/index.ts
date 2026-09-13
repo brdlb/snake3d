@@ -2,6 +2,7 @@ import {
   addPlayer,
   chooseLowestPhantom,
   createSimulation,
+  safeSpawn,
   validInput,
   validOrientation,
   type Axis,
@@ -695,13 +696,20 @@ export class RoomDurableObject {
     const state = await this.prepareState(seed);
     const existing = await this.activeReplays(seed, user.id);
     const spawn = chooseSpawn(existing.results.map((row) => JSON.parse(row.payload_json)));
-    const weakest = chooseLowestPhantom(Object.values(state.players));
-    if (weakest) delete state.players[weakest.entityId];
+    let availableSpawn = safeSpawn(state, undefined, spawn);
+    if (!availableSpawn.safe) {
+      const weakest = chooseLowestPhantom(Object.values(state.players));
+      if (!weakest) return json({ error: { code: 'ROOM_FULL' } }, 409);
+      delete state.players[weakest.entityId];
+      availableSpawn = safeSpawn(state, undefined, weakest.spawnIndex ?? spawn);
+      if (!availableSpawn.safe) return json({ error: { code: 'ROOM_FULL' } }, 409);
+    }
     const player = addPlayer(state, user.id, user.username, Date.now(), {
-      spawnIndex: spawn,
+      spawnIndex: availableSpawn.spawnIndex,
       entityId: crypto.randomUUID(),
     });
-    this.startTrajectory(state, player, spawn);
+    const actualSpawn = player.spawnIndex ?? availableSpawn.spawnIndex;
+    this.startTrajectory(state, player, actualSpawn);
     const time = now();
     await this.env.DB.batch([
       this.env.DB.prepare(
@@ -714,10 +722,10 @@ export class RoomDurableObject {
       ),
       this.env.DB.prepare(
         'INSERT INTO room_assignments(user_id,room_seed,spawn_index,assigned_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET room_seed=excluded.room_seed,spawn_index=excluded.spawn_index,assigned_at=excluded.assigned_at',
-      ).bind(user.id, seed, spawn, time),
+      ).bind(user.id, seed, actualSpawn, time),
       this.env.DB.prepare(
         'INSERT INTO room_players(room_seed,user_id,spawn_index,joined_at) VALUES(?,?,?,?) ON CONFLICT(room_seed,user_id) DO UPDATE SET spawn_index=excluded.spawn_index,joined_at=excluded.joined_at',
-      ).bind(seed, user.id, spawn, time),
+      ).bind(seed, user.id, actualSpawn, time),
       this.env.DB.prepare(
         'INSERT INTO live_room_assignments(room_seed,user_id,spawn_json,assigned_at) VALUES(?,?,?,?) ON CONFLICT(room_seed,user_id) DO UPDATE SET spawn_json=excluded.spawn_json,assigned_at=excluded.assigned_at',
       ).bind(

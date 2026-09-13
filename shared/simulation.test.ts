@@ -4,9 +4,18 @@ import { addPlayer, advanceSimulation, chooseLowestPhantom, createSimulation, sa
 describe('live room simulation', () => {
   it('chooses an unoccupied dynamic spawn', () => {
     const state = createSimulation(42);
-    addPlayer(state, 'a', 'A', 0);
-    const spawn = safeSpawn(state, () => .5);
+    addPlayer(state, 'a', 'A', 0, { spawnIndex: 0 });
+    const spawn = safeSpawn(state, () => .5, 0);
     expect(Object.values(state.players).find(player => player.id === 'a')?.segments.some(p => p.x === spawn.position.x && p.y === spawn.position.y && p.z === spawn.position.z)).toBe(false);
+    expect(spawn).toMatchObject({ spawnIndex: 1, safe: true });
+  });
+
+  it('reports when every room spawn is occupied instead of silently overlapping it', () => {
+    const state = createSimulation(43);
+    for (let spawnIndex = 0; spawnIndex < 4; spawnIndex++)
+      addPlayer(state, `player-${spawnIndex}`, `Player ${spawnIndex}`, 0, { spawnIndex });
+
+    expect(safeSpawn(state, undefined, 2)).toMatchObject({ spawnIndex: 2, safe: false });
   });
 
   it('rejects diagonal and immediate reverse input', () => {

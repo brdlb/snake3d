@@ -20,6 +20,7 @@ export type SimPlayer = {
   disconnectedAt?: number;
   lastInputSeq?: number;
   lastStateSeq?: number;
+  spawnIndex?: number;
 };
 export type ReplayTrajectory = {
   startPosition: Axis;
@@ -105,7 +106,7 @@ export function safeSpawn(
   state: SimulationState,
   _random = rng(state.seed + state.tick + Object.keys(state.players).length),
   requestedIndex?: number,
-): { position: Axis; direction: Axis } {
+): { position: Axis; direction: Axis; spawnIndex: number; safe: boolean } {
   void _random;
   const blocked = new Set(
     Object.values(state.players)
@@ -123,11 +124,18 @@ export function safeSpawn(
       z: spawn.position.z - spawn.direction.z * 2,
     };
     if (inBounds(tail) && !blocked.has(key(spawn.position)) && !blocked.has(key(tail)))
-      return { position: { ...spawn.position }, direction: { ...spawn.direction } };
+      return {
+        position: { ...spawn.position },
+        direction: { ...spawn.direction },
+        spawnIndex: (start + offset) % spawnPoints.length,
+        safe: true,
+      };
   }
   return {
     position: { ...spawnPoints[start].position },
     direction: { ...spawnPoints[start].direction },
+    spawnIndex: start,
+    safe: false,
   };
 }
 export function addPlayer(
@@ -166,6 +174,7 @@ export function addPlayer(
     color: options.color ?? (options.phantom ? '#7dd3fc' : '#ffffff'),
     nextStepAt: now + 200,
     instanceId: options.instanceId,
+    spawnIndex: spawn.spawnIndex,
   };
   return state.players[entityId];
 }
