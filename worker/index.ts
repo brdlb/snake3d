@@ -596,6 +596,8 @@ export class RoomDurableObject {
     seed: number,
     user: User,
     excludeAssignedSpawn = false,
+    playerSpawn?: RoomData['playerSpawn'],
+    playerSegments: Axis[] = [],
   ): Promise<RoomData> {
     const replays = await this.activeReplays(seed);
     const assignment = await this.env.DB.prepare(
@@ -609,9 +611,21 @@ export class RoomDurableObject {
       phantoms: replays.results
         .map((r) => JSON.parse(r.payload_json))
         .filter(
-          (replay) => !excludeAssignedSpawn || replay.startParams?.spawnIndex !== playerSpawnIndex,
+          (replay) =>
+            !excludeAssignedSpawn ||
+            (replay.startParams?.spawnIndex !== playerSpawnIndex &&
+              !playerSegments.some((segment) => {
+                const start = replay.startParams?.startPosition;
+                return (
+                  start &&
+                  start.x === segment.x &&
+                  start.y === segment.y &&
+                  start.z === segment.z
+                );
+              })),
         ),
       playerSpawnIndex,
+      playerSpawn,
     };
   }
   private async selectRoom(user: User) {
@@ -754,7 +768,19 @@ export class RoomDurableObject {
         },
       },
     });
-    return json(await this.roomData(seed, user, true));
+    return json(
+      await this.roomData(
+        seed,
+        user,
+        true,
+        {
+          position: player.segments[0],
+          direction: player.direction,
+          up: player.up,
+        },
+        player.segments,
+      ),
+    );
   }
   private async spectate({ user, seed }: { user: User; seed: number }) {
     return json(await this.roomData(seed, user));

@@ -126,6 +126,37 @@ describe('room state preparation', () => {
     expect(room.phantoms).toEqual([replay]);
   });
 
+  it('excludes a replay whose recorded start overlaps the actual player body', async () => {
+    const replay = {
+      id: 'bad-replay',
+      startParams: { spawnIndex: 3, startPosition: { x: 5, y: 5, z: 5 } },
+    };
+    const prepare = vi.fn((query: string) => ({
+      bind: () =>
+        query === ROOM_REPLAYS_QUERY
+          ? { all: vi.fn().mockResolvedValue({ results: [{ payload_json: JSON.stringify(replay) }] }) }
+          : { first: vi.fn().mockResolvedValue({ spawn_index: 0 }) },
+    }));
+    const object = new RoomDurableObject(
+      { storage: { get: vi.fn() }, getWebSockets: () => [] } as any,
+      { DB: { prepare } } as any,
+    );
+
+    const room = await (object as any).roomData(
+      123,
+      { id: 'player-1' },
+      true,
+      undefined,
+      [
+        { x: 5, y: 5, z: 5 },
+        { x: 5, y: 5, z: 4 },
+        { x: 5, y: 5, z: 3 },
+      ],
+    );
+
+    expect(room.phantoms).toEqual([]);
+  });
+
   it('counts the restarting player replay when assigning a free spawn', async () => {
     const statements: Array<{ query: string; args: unknown[] }> = [];
     const prepare = vi.fn((query: string) => ({

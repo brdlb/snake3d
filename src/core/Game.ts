@@ -470,21 +470,50 @@ export class Game {
     // Используем точку спавна, назначенную сервером
     this.playerSpawnIndex = data.playerSpawnIndex;
     const spawn = getSpawnPoint(this.playerSpawnIndex);
+    const serverSpawn = data.playerSpawn;
+    const spawnPosition = serverSpawn
+      ? new THREE.Vector3(serverSpawn.position.x, serverSpawn.position.y, serverSpawn.position.z)
+      : spawn.position.clone();
+    const spawnDirection = serverSpawn
+      ? this.orientationQuaternion(
+          new THREE.Vector3(
+            serverSpawn.direction.x,
+            serverSpawn.direction.y,
+            serverSpawn.direction.z,
+          ),
+          new THREE.Vector3(serverSpawn.up.x, serverSpawn.up.y, serverSpawn.up.z),
+        )
+      : spawn.direction.clone();
 
     // Сбрасываем змейку на выбранную точку спауна
-    this.snake.reset(spawn.position.clone(), spawn.direction.clone());
+    this.snake.reset(spawnPosition, spawnDirection);
 
     // Phantoms are fully client-side replay entities. Their recorded input
     // controls turns, while their food effects are calculated locally.
-    this.phantoms = data.phantoms.map((replayData: ReplayData, index: number) => {
-      this.logAction('phantom.received', { seed: data.seed, index, replay: replayData });
-      return new Phantom(replayData, index);
-    });
+    this.phantoms = data.phantoms
+      .map((replayData: ReplayData, index: number) => {
+        this.logAction('phantom.received', { seed: data.seed, index, replay: replayData });
+        return new Phantom(replayData, index);
+      })
+      .filter((phantom) => {
+        const overlapsPlayer = phantom.segments.some((phantomSegment) =>
+          this.snake.segments.some(
+            (playerSegment) => phantomSegment.distanceToSquared(playerSegment) < 0.1,
+          ),
+        );
+        if (overlapsPlayer)
+          this.logAction('phantom.rejected', {
+            seed: data.seed,
+            replayId: phantom.replayPlayer.replayId,
+            reason: 'spawn-overlap',
+          });
+        return !overlapsPlayer;
+      });
 
     // Выводим координаты и направление респавна
-    const spawnDir = new THREE.Vector3(0, 0, 1).applyQuaternion(spawn.direction);
+    const spawnDir = new THREE.Vector3(0, 0, -1).applyQuaternion(spawnDirection);
     console.log(
-      `[Game] Spawn position: (${spawn.position.x}, ${spawn.position.y}, ${spawn.position.z})`,
+      `[Game] Spawn position: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z})`,
     );
     console.log(
       `[Game] Spawn direction: (${spawnDir.x.toFixed(2)}, ${spawnDir.y.toFixed(2)}, ${spawnDir.z.toFixed(2)})`,
@@ -501,12 +530,12 @@ export class Game {
       // Инициализируем запись реплея с индексом спауна и начальной скоростью
       this.replayRecorder = new ReplayRecorder(data.seed, this.playerSpawnIndex, this.currentSPM);
       // Начинаем запись с начальным направлением
-      const initialDir = new THREE.Vector3(0, 0, -1).applyQuaternion(spawn.direction);
+      const initialDir = new THREE.Vector3(0, 0, -1).applyQuaternion(spawnDirection);
       if (Math.abs(initialDir.x) > 0.5) initialDir.set(Math.sign(initialDir.x), 0, 0);
       else if (Math.abs(initialDir.y) > 0.5) initialDir.set(0, Math.sign(initialDir.y), 0);
       else initialDir.set(0, 0, Math.sign(initialDir.z));
       this.lastRecordedDirection.copy(initialDir);
-      this.replayRecorder.start(initialDir, spawn.position);
+      this.replayRecorder.start(initialDir, spawnPosition);
     }
   }
 
