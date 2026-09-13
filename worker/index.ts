@@ -628,7 +628,10 @@ export class RoomDurableObject {
     } else {
       seed = await this.selectRoom(user);
     }
-    const existing = await this.activeReplays(seed, user.id);
+    // Keep the restarting player's saved replay in the occupancy set. Excluding
+    // it can make an already recorded spawn look free and hide that replay when
+    // roomData removes the newly assigned spawn from the phantom list.
+    const existing = await this.activeReplays(seed);
     const spawn = chooseSpawn(
       existing.results.map((row) => JSON.parse(row.payload_json)),
       action === 'restart' ? current!.spawn_index : undefined,

@@ -117,4 +117,42 @@ describe('room state preparation', () => {
 
     expect(room.phantoms).toEqual([replay]);
   });
+
+  it('counts the restarting player replay when assigning a free spawn', async () => {
+    const statements: Array<{ query: string; args: unknown[] }> = [];
+    const prepare = vi.fn((query: string) => ({
+      bind: (...args: unknown[]) =>
+        query === 'SELECT room_seed,spawn_index FROM room_assignments WHERE user_id=?'
+          ? { first: vi.fn().mockResolvedValue({ room_seed: 123, spawn_index: 1 }) }
+          : { query, args },
+    }));
+    const object = new RoomDurableObject(
+      { storage: { get: vi.fn() }, getWebSockets: () => [] } as any,
+      { DB: { prepare, batch: vi.fn(async (batch) => statements.push(...batch)) } } as any,
+    );
+    const replays = [0, 1, 2].map((spawnIndex, index) => ({
+      playerId: index === 1 ? 'player-1' : `player-${index + 2}`,
+      startParams: { spawnIndex },
+    }));
+    const activeReplays = vi
+      .spyOn(object as any, 'activeReplays')
+      .mockResolvedValue({ results: replays.map((replay) => ({ payload_json: JSON.stringify(replay) })) });
+    vi.spyOn(object as any, 'roomData').mockResolvedValue({
+      seed: 123,
+      phantoms: [],
+      playerSpawnIndex: 3,
+    });
+
+    await (object as any).assign({
+      action: 'restart',
+      contextSeed: 123,
+      user: { id: 'player-1', username: 'Player', elo: 1000 },
+    });
+
+    expect(activeReplays).toHaveBeenCalledWith(123);
+    expect(
+      statements.find((statement) => statement.query.startsWith('INSERT INTO room_assignments'))
+        ?.args[2],
+    ).toBe(3);
+  });
 });
