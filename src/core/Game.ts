@@ -22,6 +22,7 @@ import { NetworkManager } from '../network/NetworkManager';
 import { NetworkStatusUI } from '../network/NetworkStatusUI';
 import { PauseUI, GameStats } from '../ui/PauseUI';
 import type { ReplayData, RoomData } from '../types/replay';
+import { replaceRoomInAddress } from '../utils/RoomUrl';
 import type {
   PlayerDirectionChanged,
   PlayerDied,
@@ -532,6 +533,7 @@ export class Game {
       try {
         const room = await this.networkManager.requestRoom(action, roomSeed ?? undefined);
         this.selectedRoomSeed = room.seed;
+        if (!this.isSpectating) replaceRoomInAddress(room.seed);
         this.initializeRoom(room);
         // The socket can deliver its initial snapshot before room initialization
         // finishes. Request one more snapshot after the local room is ready.
@@ -1708,6 +1710,8 @@ export class Game {
       // The assignment has completed before this screen is closed, so an API
       // error leaves the player on Game Over with a retryable action.
       if (room) {
+        this.selectedRoomSeed = room.seed;
+        replaceRoomInAddress(room.seed);
         this.initializeRoom(room);
         this.cachePhantomsForOffline(room.phantoms);
       } else {
