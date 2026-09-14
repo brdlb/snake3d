@@ -13,6 +13,7 @@ export type DirectionInput = {
   seq: number;
   step: number;
   head: Axis;
+  segments: Axis[];
   direction: Axis;
   up: Axis;
 };
@@ -21,7 +22,7 @@ export type StateInput = SnakeState & {
   type: 'state';
   seq: number;
   step: number;
-  reason: 'food' | 'speed' | 'reconnect' | 'spawn';
+  reason: 'food' | 'speed' | 'reconnect' | 'spawn' | 'spectator-sync';
 };
 
 export type DeathInput = SnakeState & {
@@ -69,6 +70,7 @@ export type RealtimeClientMessage =
 export type RealtimeServerMessage =
   | { v: 2; type: 'pong' }
   | { v: 2; type: 'room.state'; payload: RoomSnapshot }
+  | { v: 2; type: 'room.syncRequested'; payload: { requestId: string } }
   | { v: 2; type: 'player.directionChanged'; payload: PlayerDirectionChanged }
   | { v: 2; type: 'player.state'; payload: PlayerStateChanged }
   | { v: 2; type: 'player.died'; payload: PlayerDied }

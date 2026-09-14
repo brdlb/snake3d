@@ -155,7 +155,8 @@ function stateInput(value: unknown): value is StateInput {
     (action.reason === 'food' ||
       action.reason === 'speed' ||
       action.reason === 'reconnect' ||
-      action.reason === 'spawn')
+      action.reason === 'spawn' ||
+      action.reason === 'spectator-sync')
   );
 }
 function deathInput(value: unknown): value is DeathInput {
@@ -177,6 +178,14 @@ function directionInput(value: unknown): value is DirectionInput {
     sequence(action.step) &&
     position(action.head) &&
     Object.values(action.head as Record<string, number>).every(Number.isInteger) &&
+    Array.isArray(action.segments) &&
+    action.segments.length > 0 &&
+    action.segments.length <= 10000 &&
+    action.segments.every(
+      (segment) =>
+        position(segment) &&
+        Object.values(segment as Record<string, number>).every(Number.isInteger),
+    ) &&
     validOrientation(action.direction, action.up)
   );
 }
@@ -464,6 +473,7 @@ export class RoomDurableObject {
   ) {}
   private simulation: SimulationState | null = null;
   private restartUserId: string | null = null;
+  private lastSpectatorSyncRequestAt = 0;
   private snapshot(state: SimulationState) {
     return {
       seed: state.seed,
@@ -1066,6 +1076,7 @@ export class RoomDurableObject {
       instanceId: player?.instanceId,
     });
     server.send(JSON.stringify({ v: 2, type: 'room.state', payload: this.snapshot(state) }));
+    if (spectator) this.requestSpectatorSync();
     if (playerJoined)
       this.broadcast({
         v: 2,
@@ -1203,6 +1214,7 @@ export class RoomDurableObject {
       }
       player.direction = action.direction;
       player.up = action.up;
+      player.segments = action.segments;
       player.lastInputSeq = action.seq;
       this.recordDirection(state, player, action.head);
       await this.persist(state);
@@ -1215,6 +1227,7 @@ export class RoomDurableObject {
             seq: action.seq,
             step: action.step,
             head: action.head,
+            segments: player.segments,
             direction: player.direction,
             up: player.up,
             speed: player.speed,
@@ -1258,6 +1271,23 @@ export class RoomDurableObject {
       type: 'presence.updated',
       payload: { count: this.ctx.getWebSockets().length },
     });
+  }
+  private requestSpectatorSync() {
+    const requestedAt = Date.now();
+    if (requestedAt - this.lastSpectatorSyncRequestAt < 500) return;
+    this.lastSpectatorSyncRequestAt = requestedAt;
+    const text = JSON.stringify({
+      v: 2,
+      type: 'room.syncRequested',
+      payload: { requestId: crypto.randomUUID() },
+    });
+    for (const socket of this.ctx.getWebSockets())
+      try {
+        const attachment = socket.deserializeAttachment() as { spectator?: boolean } | null;
+        if (!attachment?.spectator) socket.send(text);
+      } catch {
+        socket.close();
+      }
   }
   private sendToUser(userId: string, message: unknown) {
     const text = JSON.stringify(message);

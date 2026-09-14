@@ -228,4 +228,148 @@ describe('room state preparation', () => {
         ?.args[2],
     ).toBe(1);
   });
+
+  it('requests one state sync from players when spectators arrive together', () => {
+    const playerSend = vi.fn();
+    const spectatorSend = vi.fn();
+    const playerSocket = {
+      deserializeAttachment: () => ({ spectator: false }),
+      send: playerSend,
+      close: vi.fn(),
+    };
+    const spectatorSocket = {
+      deserializeAttachment: () => ({ spectator: true }),
+      send: spectatorSend,
+      close: vi.fn(),
+    };
+    const object = new RoomDurableObject(
+      { getWebSockets: () => [playerSocket, spectatorSocket] } as any,
+      {} as any,
+    );
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+
+    (object as any).requestSpectatorSync();
+    (object as any).requestSpectatorSync();
+
+    expect(playerSend).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(playerSend.mock.calls[0][0])).toMatchObject({
+      v: 2,
+      type: 'room.syncRequested',
+      payload: { requestId: expect.any(String) },
+    });
+    expect(spectatorSend).not.toHaveBeenCalled();
+  });
+
+  it('persists and broadcasts a spectator sync state', async () => {
+    const state = createSimulation(123);
+    const player = addPlayer(state, 'player-1', 'Player', 0, {
+      entityId: 'entity-1',
+      instanceId: 'connection-1',
+    });
+    const sender = {
+      deserializeAttachment: () => ({
+        userId: 'player-1',
+        entityId: 'entity-1',
+        seed: 123,
+        instanceId: 'connection-1',
+      }),
+      send: vi.fn(),
+      close: vi.fn(),
+    };
+    const spectator = {
+      deserializeAttachment: () => ({ spectator: true }),
+      send: vi.fn(),
+      close: vi.fn(),
+    };
+    const storage = { put: vi.fn(), deleteAlarm: vi.fn() };
+    const object = new RoomDurableObject(
+      { storage, getWebSockets: () => [sender, spectator] } as any,
+      {} as any,
+    );
+    (object as any).simulation = state;
+    const segments = [
+      { x: 10, y: 10, z: 10 },
+      { x: 10, y: 10, z: 9 },
+      { x: 10, y: 10, z: 8 },
+    ];
+
+    await object.webSocketMessage(
+      sender as any,
+      JSON.stringify({
+        v: 2,
+        type: 'player.state',
+        payload: {
+          action: {
+            type: 'state',
+            seq: 1,
+            step: 5,
+            reason: 'spectator-sync',
+            segments,
+            direction: { x: 0, y: 0, z: 1 },
+            up: { x: 0, y: 1, z: 0 },
+            score: 0,
+            speed: 300,
+          },
+        },
+      }),
+    );
+
+    expect(player.segments).toEqual(segments);
+    expect(storage.put).toHaveBeenCalledWith('simulation', state);
+    expect(JSON.parse(spectator.send.mock.calls[0][0])).toMatchObject({
+      type: 'player.state',
+      payload: { entityId: 'entity-1', segments, reason: 'spectator-sync' },
+    });
+  });
+
+  it('rejects invalid direction segments and ignores an old sequence', async () => {
+    const state = createSimulation(123);
+    const player = addPlayer(state, 'player-1', 'Player', 0, {
+      entityId: 'entity-1',
+      instanceId: 'connection-1',
+    });
+    player.lastInputSeq = 2;
+    const sender = {
+      deserializeAttachment: () => ({
+        userId: 'player-1',
+        entityId: 'entity-1',
+        seed: 123,
+        instanceId: 'connection-1',
+      }),
+      send: vi.fn(),
+      close: vi.fn(),
+    };
+    const storage = { put: vi.fn(), deleteAlarm: vi.fn() };
+    const object = new RoomDurableObject(
+      { storage, getWebSockets: () => [sender] } as any,
+      {} as any,
+    );
+    (object as any).simulation = state;
+    const message = (seq: number, segments: unknown) =>
+      JSON.stringify({
+        v: 2,
+        type: 'player.directionChanged',
+        payload: {
+          action: {
+            type: 'direction',
+            seq,
+            step: 5,
+            head: { x: 5, y: 5, z: 5 },
+            segments,
+            direction: { x: 1, y: 0, z: 0 },
+            up: { x: 0, y: 1, z: 0 },
+          },
+        },
+      });
+
+    await object.webSocketMessage(sender as any, message(3, []));
+    await object.webSocketMessage(sender as any, message(2, player.segments));
+
+    expect(JSON.parse(sender.send.mock.calls[0][0])).toMatchObject({
+      type: 'error',
+      payload: { code: 'INVALID_MESSAGE' },
+    });
+    expect(player.lastInputSeq).toBe(2);
+    expect(storage.put).not.toHaveBeenCalled();
+  });
 });

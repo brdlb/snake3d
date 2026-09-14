@@ -30,7 +30,12 @@ import type {
   RoomSnapshot,
   SnakeState,
 } from '../../shared/realtime';
-import { findLocalPlayer, isLiveOpponent } from './livePlayers';
+import {
+  advanceLiveOpponent,
+  applyLiveDirectionState,
+  findLocalPlayer,
+  isLiveOpponent,
+} from './livePlayers';
 
 interface Pulse {
   color: THREE.Color;
@@ -341,6 +346,9 @@ export class Game {
     this.networkManager.on('room.state', (snapshot: RoomSnapshot) =>
       this.applyLiveSnapshot(snapshot),
     );
+    this.networkManager.on('room.syncRequested', () => {
+      if (this.liveWorld && !this.isSpectating) this.sendLivePlayerState('spectator-sync');
+    });
     this.networkManager.on('player.joined', () => this.networkManager.requestResync());
     this.networkManager.on('room.left', (change: any) => {
       if (change?.entityId)
@@ -423,6 +431,7 @@ export class Game {
             seq: ++this.localInputSeq,
             step: this.playerTick,
             head: this.positionData(this.snake.getHead()),
+            segments: state.segments,
             direction: state.direction,
             up: state.up,
           });
@@ -725,18 +734,9 @@ export class Game {
       this.networkManager.requestResync();
       return;
     }
-    opponent.directionVector
-      .set(change.direction.x, change.direction.y, change.direction.z)
-      .normalize();
-    opponent.up.set(change.up.x, change.up.y, change.up.z).normalize();
-    opponent.direction.copy(this.orientationQuaternion(opponent.directionVector, opponent.up));
-    opponent.speed = Math.max(60, change.speed ?? opponent.speed);
-    const head = new THREE.Vector3(change.head.x, change.head.y, change.head.z);
-    const offset = head.sub(opponent.segments[0]);
-    if (offset.lengthSq() > 0) for (const segment of opponent.segments) segment.add(offset);
-    opponent.elapsed = 0;
-    opponent.serverTick = change.step;
-    opponent.serverTime = change.serverTime ?? Date.now();
+    applyLiveDirectionState(opponent, change, (direction, up) =>
+      this.orientationQuaternion(direction, up),
+    );
   }
 
   private applyLiveState(change: PlayerStateChanged) {
@@ -773,7 +773,9 @@ export class Game {
     };
   }
 
-  private sendLivePlayerState(reason: 'food' | 'speed' | 'reconnect' | 'spawn') {
+  private sendLivePlayerState(
+    reason: 'food' | 'speed' | 'reconnect' | 'spawn' | 'spectator-sync',
+  ) {
     this.networkManager.sendPlayerState({
       type: 'state',
       seq: ++this.localStateSeq,
@@ -848,45 +850,6 @@ export class Game {
       return;
     }
     if (!this.isGameOver) void this.handleGameOver();
-  }
-
-  private advanceLiveOpponent(
-    opponent: {
-      id: string;
-      speed: number;
-      alive: boolean;
-      segments: THREE.Vector3[];
-      directionVector: THREE.Vector3;
-      elapsed: number;
-      serverTick: number;
-    },
-    seconds: number,
-  ) {
-    if (!opponent.alive || !opponent.segments.length) return;
-    opponent.elapsed += seconds;
-    const interval = 60 / Math.max(60, opponent.speed);
-    while (opponent.elapsed >= interval) {
-      opponent.elapsed -= interval;
-      const liveOpponent = opponent as (typeof this.liveOpponents)[number];
-      const nextTurn = liveOpponent.replay?.trajectoryLog[liveOpponent.replayIndex];
-      if (
-        nextTurn &&
-        this.positionData(liveOpponent.segments[0]).x === nextTurn.position.x &&
-        this.positionData(liveOpponent.segments[0]).y === nextTurn.position.y &&
-        this.positionData(liveOpponent.segments[0]).z === nextTurn.position.z
-      ) {
-        liveOpponent.directionVector
-          .set(nextTurn.direction.x, nextTurn.direction.y, nextTurn.direction.z)
-          .normalize();
-        liveOpponent.direction.copy(
-          this.orientationQuaternion(liveOpponent.directionVector, liveOpponent.up),
-        );
-        liveOpponent.replayIndex++;
-      }
-      const tail = opponent.segments.pop()!;
-      opponent.segments.unshift(tail.copy(opponent.segments[0]).add(opponent.directionVector));
-      opponent.serverTick++;
-    }
   }
 
   private syncOpponentLength(opponent: { segments: THREE.Vector3[] }, length: number) {
@@ -1052,6 +1015,11 @@ export class Game {
     }
 
     if (this.isSpectating) {
+      if (this.liveWorld)
+        for (const opponent of this.liveOpponents)
+          advanceLiveOpponent(opponent, delta, (direction, up) =>
+            this.orientationQuaternion(direction, up),
+          );
       const focus =
         this.liveOpponents[0]?.segments[0] ?? this.phantoms[0]?.getHead() ?? this.snake.getHead();
       this.cameraController.update(delta, focus, this.snake.direction, 0);
@@ -1109,7 +1077,10 @@ export class Game {
 
     // Logic Update
     if (this.liveWorld)
-      for (const opponent of this.liveOpponents) this.advanceLiveOpponent(opponent, delta);
+      for (const opponent of this.liveOpponents)
+        advanceLiveOpponent(opponent, delta, (direction, up) =>
+          this.orientationQuaternion(direction, up),
+        );
     if (this.liveWorld) this.checkLivePhantomCollisions();
     const preStepHead = this.snake.getHead().clone();
     if (this.snake.update(delta)) {
