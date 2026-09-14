@@ -183,7 +183,6 @@ export class ReplayPlayer {
                 this.currentIndex++;
                 lastFoundDirection = newDirection;
 
-                console.log(`[ReplayPlayer] Phantom ${this.replayId} processed direction change at (${currentPosition.x}, ${currentPosition.y}, ${currentPosition.z})`);
             } else {
                 // Next change is at a different position
                 break;

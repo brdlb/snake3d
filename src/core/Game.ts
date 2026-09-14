@@ -140,7 +140,6 @@ export class Game {
   private lastLiveTick: number | null = null;
   private spectatorBanner: HTMLDivElement | null = null;
   private playerTick = 0;
-  private phantomTicks = new Map<string, number>();
   private localInputSeq = 0;
   private localStateSeq = 0;
   private localSnakeInitialized = false;
@@ -458,7 +457,6 @@ export class Game {
     this.localStateSeq = 0;
     this.localSnakeInitialized = false;
     this.wasBoosting = false;
-    this.phantomTicks.clear();
     this.currentSeed = data.seed;
     this.pauseUI.updateRoom(data.seed);
 
@@ -727,7 +725,6 @@ export class Game {
       this.networkManager.requestResync();
       return;
     }
-    console.log('[Game] Phantom direction change received from server:', change);
     opponent.directionVector
       .set(change.direction.x, change.direction.y, change.direction.z)
       .normalize();
@@ -885,20 +882,10 @@ export class Game {
           this.orientationQuaternion(liveOpponent.directionVector, liveOpponent.up),
         );
         liveOpponent.replayIndex++;
-        this.logAction('phantom.directionChanged', {
-          replayId: liveOpponent.replay?.id,
-          position: nextTurn.position,
-          direction: nextTurn.direction,
-          source: 'replay',
-        });
       }
       const tail = opponent.segments.pop()!;
       opponent.segments.unshift(tail.copy(opponent.segments[0]).add(opponent.directionVector));
-      this.logAction('phantom.tick', {
-        entityId: opponent.id,
-        tick: ++opponent.serverTick,
-        position: this.positionData(opponent.segments[0]),
-      });
+      opponent.serverTick++;
     }
   }
 
@@ -1181,25 +1168,7 @@ export class Game {
         if (phantomStepped && !phantom.isDeadNow()) {
           const phantomId =
             phantom.replayPlayer.replayId || `phantom-${this.phantoms.indexOf(phantom)}`;
-          const directionChange = phantom.consumeDirectionChange();
-          if (directionChange) {
-            this.logAction('phantom.directionChanged', {
-              replayId: phantomId,
-              position: this.positionData(directionChange.position),
-              direction: this.positionData(directionChange.direction),
-              source: 'replay',
-            });
-          }
-          const phantomTick = (this.phantomTicks.get(phantomId) ?? 0) + 1;
-          this.phantomTicks.set(phantomId, phantomTick);
-          this.logAction('phantom.tick', {
-            replayId: phantomId,
-            tick: phantomTick,
-            position: this.positionData(phantom.getHead()),
-            direction: this.positionData(phantom.getMoveDirection()),
-            score: phantom.getScore(),
-            length: phantom.segments.length,
-          });
+          phantom.consumeDirectionChange();
           // Safety check: Kill if out of bounds (prevents infinite walking if replay desyncs)
           if (this.world.isOutOfBounds(phantom.getHead())) {
             this.logAction('phantom.death', {
