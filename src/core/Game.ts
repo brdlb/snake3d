@@ -11,6 +11,7 @@ import { SettingsManager } from './SettingsManager';
 import { SceneManager } from '../graphics/SceneManager';
 import { CameraController } from './CameraController';
 import { PostProcessManager } from '../graphics/PostProcessManager';
+import { getRenderableSegmentCount } from '../graphics/SnakeRendering';
 import { SettingsUI } from '../ui/SettingsUI';
 import { GameOverUI } from '../ui/GameOverUI';
 import { GameHUD } from '../ui/GameHUD';
@@ -1739,7 +1740,7 @@ export class Game {
     if (this.foodMesh.instanceColor) this.foodMesh.instanceColor.needsUpdate = true;
 
     // Update Snake InstancedMesh
-    const count = this.isSpectating ? 0 : this.snake.segments.length;
+    const count = this.isSpectating ? 0 : getRenderableSegmentCount(this.snake.segments);
     this.snakeMesh.count = count;
 
     // Prune old pulses
@@ -1812,7 +1813,8 @@ export class Game {
         }
       }
       for (const opponent of this.liveOpponents) {
-        for (let i = 0; i < opponent.segments.length; i++) {
+        const renderableCount = getRenderableSegmentCount(opponent.segments);
+        for (let i = 0; i < renderableCount; i++) {
           this.dummy.position.copy(opponent.segments[i]);
           this.dummy.rotation.set(0, 0, 0);
           if (i === 0) this.dummy.quaternion.copy(opponent.direction);
