@@ -4,6 +4,12 @@ export const WallMaterial = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     transparent: true,
     depthWrite: false, // Important for proper transparency sorting/rendering of double-sided transparent objects
+    // `grid` uses fwidth(). WebGL 1 exposes derivatives only through this
+    // extension; without it the shader fails to link and the renderer later
+    // repeatedly attempts to use the invalid program.
+    extensions: {
+        derivatives: true
+    },
     uniforms: {
         uColor: { value: new THREE.Color(0xffffff) },
         uBaseColor: { value: new THREE.Color(0x050505) },
