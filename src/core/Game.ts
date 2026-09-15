@@ -21,7 +21,7 @@ import { SoundManager } from '../audio/SoundManager';
 import { ReplayRecorder } from './ReplaySystem';
 import { NetworkManager } from '../network/NetworkManager';
 import { NetworkStatusUI } from '../network/NetworkStatusUI';
-import { PauseUI, GameStats } from '../ui/PauseUI';
+import { PauseUI, GameStats, type PauseSnake } from '../ui/PauseUI';
 import type { ReplayData, RoomData } from '../types/replay';
 import { replaceRoomInAddress } from '../utils/RoomUrl';
 import type {
@@ -126,6 +126,7 @@ export class Game {
 
   // Pause & Stats
   private isPaused: boolean = false;
+  private pauseSelectedSnakeId = 'self';
   private gameStats: GameStats = {
     score: 0,
     length: 5,
@@ -478,8 +479,14 @@ export class Game {
       }
     };
 
-    this.input.on('left', () => handleTurn(() => this.snake.rotate(Math.PI / 2)));
-    this.input.on('right', () => handleTurn(() => this.snake.rotate(-Math.PI / 2)));
+    this.input.on('left', () => {
+      if (this.isPaused) return this.changePauseSnake(-1);
+      handleTurn(() => this.snake.rotate(Math.PI / 2));
+    });
+    this.input.on('right', () => {
+      if (this.isPaused) return this.changePauseSnake(1);
+      handleTurn(() => this.snake.rotate(-Math.PI / 2));
+    });
     this.input.on('rollLeft', () => handleTurn(() => this.snake.roll(-Math.PI / 2)));
     this.input.on('rollRight', () => handleTurn(() => this.snake.roll(Math.PI / 2)));
     this.input.on('pause', () => this.togglePause()); // Escape key
@@ -1113,7 +1120,8 @@ export class Game {
     if (this.liveWorld && !this.isSpectating) this.sendLivePause();
 
     if (this.isPaused) {
-      this.pauseUI.updateStats(this.gameStats);
+      this.pauseSelectedSnakeId = 'self';
+      this.updatePauseSelection();
       this.pauseUI.show();
       this.cameraController.setOrbitMode();
       this.soundManager.setAmbientLowPass(true);
@@ -1123,6 +1131,56 @@ export class Game {
       this.cameraController.stopOrbitMode();
       this.soundManager.setAmbientLowPass(false);
     }
+  }
+
+  private pauseSnakes(): PauseSnake[] {
+    return [
+      {
+        id: 'self',
+        name: this.playerName,
+        kind: 'self',
+        appearance: this.appearance,
+        stats: this.gameStats,
+      },
+      ...this.liveOpponents.map((opponent) => ({
+        id: `live:${opponent.id}`,
+        name: opponent.name,
+        kind: opponent.phantom ? 'phantom' as const : 'player' as const,
+        appearance: opponent.appearance,
+        stats: {
+          score: opponent.score,
+          length: opponent.segments.length,
+          avgSpeed: opponent.speed,
+        },
+      })),
+      ...this.phantoms.map((phantom, index) => ({
+        id: `phantom:${phantom.replayPlayer.replayId ?? index}`,
+        name: phantom.getPlayerName(),
+        kind: 'phantom' as const,
+        appearance: phantom.appearance,
+        stats: {
+          score: phantom.getScore(),
+          length: phantom.segments.length,
+          avgSpeed: phantom.getSPM(),
+        },
+      })),
+    ];
+  }
+
+  private changePauseSnake(direction: -1 | 1) {
+    const snakes = this.pauseSnakes();
+    const currentIndex = Math.max(0, snakes.findIndex((snake) => snake.id === this.pauseSelectedSnakeId));
+    const nextIndex = (currentIndex + direction + snakes.length) % snakes.length;
+    this.pauseSelectedSnakeId = snakes[nextIndex].id;
+    this.pauseUI.setSelectedSnake(snakes[nextIndex], nextIndex, snakes.length);
+  }
+
+  private updatePauseSelection() {
+    const snakes = this.pauseSnakes();
+    const selectedIndex = Math.max(0, snakes.findIndex((snake) => snake.id === this.pauseSelectedSnakeId));
+    const selected = snakes[selectedIndex];
+    this.pauseSelectedSnakeId = selected.id;
+    this.pauseUI.setSelectedSnake(selected, selectedIndex, snakes.length);
   }
 
   private async setOrientationLock(locked: boolean) {

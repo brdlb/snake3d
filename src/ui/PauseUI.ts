@@ -17,6 +17,14 @@ export interface GameStats {
     }
 }
 
+export interface PauseSnake {
+    id: string;
+    name: string;
+    kind: 'self' | 'player' | 'phantom';
+    appearance: SnakeAppearance;
+    stats: Partial<GameStats> & Pick<GameStats, 'score' | 'length' | 'avgSpeed'>;
+}
+
 export class PauseUI {
     private container!: HTMLElement;
     private resumeBtn!: HTMLButtonElement;
@@ -33,7 +41,11 @@ export class PauseUI {
     private foodBlueEl!: HTMLElement;
     private foodPinkEl!: HTMLElement;
     private roomEl!: HTMLButtonElement;
+    private selectedSnakeNameEl!: HTMLElement;
+    private selectedSnakeMetaEl!: HTMLElement;
+    private appearancePanel!: HTMLElement;
     private roomSeed: number | null = null;
+    private previewAppearance: SnakeAppearance;
 
     private onResume: () => void;
     private onSettings: () => void;
@@ -59,6 +71,7 @@ export class PauseUI {
         this.onLeaderboard = onLeaderboard;
         this.onOrientationLockChange = onOrientationLockChange;
         this.appearance = { ...appearance };
+        this.previewAppearance = { ...appearance };
         this.onAppearanceChange = onAppearanceChange;
         this.createUI();
     }
@@ -82,6 +95,51 @@ export class PauseUI {
         this.roomEl.title = 'Copy invitation link';
         this.roomEl.onclick = () => void this.copyRoomLink();
         titlePanel.appendChild(this.roomEl);
+
+        const appearancePanel = document.createElement('section');
+        appearancePanel.className = 'pause-panel appearance-panel';
+        this.appearancePanel = appearancePanel;
+        const appearanceTitle = document.createElement('span');
+        appearanceTitle.className = 'appearance-title';
+        appearanceTitle.textContent = 'SNAKE STYLE';
+        const identity = document.createElement('div');
+        identity.className = 'appearance-identity';
+        this.selectedSnakeNameEl = document.createElement('strong');
+        this.selectedSnakeNameEl.textContent = 'YOU';
+        this.selectedSnakeMetaEl = document.createElement('span');
+        this.selectedSnakeMetaEl.textContent = 'A / D · SELECT SNAKE';
+        identity.append(this.selectedSnakeNameEl, this.selectedSnakeMetaEl);
+        this.patternCanvas = document.createElement('canvas');
+        this.patternCanvas.width = 112;
+        this.patternCanvas.height = 112;
+        this.patternCanvas.className = 'pattern-preview';
+        this.patternCanvas.setAttribute('aria-label', 'Selected snake ornament preview');
+        const controls = document.createElement('div');
+        controls.className = 'appearance-controls';
+        const seedRow = document.createElement('label');
+        seedRow.className = 'appearance-seed';
+        const seedLabel = document.createElement('span');
+        seedLabel.textContent = 'SEED';
+        this.seedInput = document.createElement('input');
+        this.seedInput.type = 'number';
+        this.seedInput.min = '0';
+        this.seedInput.max = '4294967295';
+        this.seedInput.value = String(this.appearance.patternSeed);
+        const randomButton = document.createElement('button');
+        randomButton.type = 'button';
+        randomButton.textContent = 'RANDOM';
+        randomButton.onclick = () => {
+            this.seedInput.value = String(crypto.getRandomValues(new Uint32Array(1))[0]);
+            this.commitAppearance();
+        };
+        seedRow.append(seedLabel, this.seedInput, randomButton);
+        const colors = document.createElement('div');
+        colors.className = 'appearance-colors';
+        this.backgroundInput = this.createColorInput('BACKGROUND', this.appearance.backgroundColor);
+        this.patternInput = this.createColorInput('ORNAMENT', this.appearance.patternColor);
+        colors.append(this.backgroundInput.parentElement!, this.patternInput.parentElement!);
+        controls.append(seedRow, colors);
+        appearancePanel.append(appearanceTitle, identity, this.patternCanvas, controls);
 
         // 2. Stats Panel
         const statsPanel = document.createElement('div');
@@ -128,46 +186,9 @@ export class PauseUI {
         this.resumeBtn.onclick = () => this.onResume();
 
         this.container.appendChild(titlePanel);
+        this.container.appendChild(appearancePanel);
         this.container.appendChild(statsPanel);
         this.container.appendChild(this.settingsBtn);
-
-        const appearancePanel = document.createElement('section');
-        appearancePanel.className = 'pause-panel appearance-panel';
-        const appearanceTitle = document.createElement('span');
-        appearanceTitle.className = 'appearance-title';
-        appearanceTitle.textContent = 'SNAKE STYLE';
-        this.patternCanvas = document.createElement('canvas');
-        this.patternCanvas.width = 112;
-        this.patternCanvas.height = 112;
-        this.patternCanvas.className = 'pattern-preview';
-        this.patternCanvas.setAttribute('aria-label', 'Snake ornament preview');
-        const controls = document.createElement('div');
-        controls.className = 'appearance-controls';
-        const seedRow = document.createElement('label');
-        seedRow.className = 'appearance-seed';
-        const seedLabel = document.createElement('span');
-        seedLabel.textContent = 'SEED';
-        this.seedInput = document.createElement('input');
-        this.seedInput.type = 'number';
-        this.seedInput.min = '0';
-        this.seedInput.max = '4294967295';
-        this.seedInput.value = String(this.appearance.patternSeed);
-        const randomButton = document.createElement('button');
-        randomButton.type = 'button';
-        randomButton.textContent = 'RANDOM';
-        randomButton.onclick = () => {
-            this.seedInput.value = String(crypto.getRandomValues(new Uint32Array(1))[0]);
-            this.commitAppearance();
-        };
-        seedRow.append(seedLabel, this.seedInput, randomButton);
-        const colors = document.createElement('div');
-        colors.className = 'appearance-colors';
-        this.backgroundInput = this.createColorInput('BACKGROUND', this.appearance.backgroundColor);
-        this.patternInput = this.createColorInput('ORNAMENT', this.appearance.patternColor);
-        colors.append(this.backgroundInput.parentElement!, this.patternInput.parentElement!);
-        controls.append(seedRow, colors);
-        appearancePanel.append(appearanceTitle, this.patternCanvas, controls);
-        this.container.appendChild(appearancePanel);
         this.seedInput.onchange = () => this.commitAppearance();
         this.drawPattern();
 
@@ -394,6 +415,9 @@ export class PauseUI {
                 font-family: 'Jura', sans-serif;
             }
             .appearance-title { font-weight: 800; letter-spacing: 2px; writing-mode: vertical-rl; transform: rotate(180deg); }
+            .appearance-identity { display: flex; flex-direction: column; gap: 5px; min-width: 125px; }
+            .appearance-identity strong { font-size: 1.1rem; letter-spacing: 1px; overflow-wrap: anywhere; }
+            .appearance-identity span { color: #888; font-size: .68rem; font-weight: 700; letter-spacing: 1px; }
             .pattern-preview { width: 92px; height: 92px; image-rendering: pixelated; border: 2px solid #444; background: #111; }
             .appearance-controls { display: flex; flex-direction: column; gap: 12px; }
             .appearance-seed, .appearance-colors label { display: flex; align-items: center; gap: 9px; color: #888; font-size: .78rem; font-weight: 700; letter-spacing: 1px; }
@@ -404,6 +428,7 @@ export class PauseUI {
             .appearance-colors { display: flex; gap: 18px; }
             .appearance-colors label { flex-direction: column; align-items: flex-start; }
             .appearance-colors input { width: 52px; height: 28px; padding: 0; border: 1px solid #555; background: #111; cursor: pointer; }
+            .appearance-panel.readonly .appearance-controls { display: none; }
 
             .resume-btn {
                 transition-delay: 0.3s;
@@ -477,16 +502,31 @@ export class PauseUI {
         document.head.appendChild(style);
     }
 
-    public updateStats(stats: GameStats) {
-        this.scoreEl.textContent = stats.score.toString();
-        this.lengthEl.textContent = stats.length.toString();
-        this.timeEl.textContent = this.formatTime(stats.time);
-        this.distanceEl.textContent = Math.round(stats.distance).toString();
-        this.speedEl.textContent = Math.round(stats.avgSpeed).toString();
+    public updateStats(stats: Partial<GameStats>) {
+        this.scoreEl.textContent = this.formatNumber(stats.score);
+        this.lengthEl.textContent = this.formatNumber(stats.length);
+        this.timeEl.textContent = stats.time === undefined ? '—' : this.formatTime(stats.time);
+        this.distanceEl.textContent = stats.distance === undefined ? '—' : this.formatNumber(Math.round(stats.distance));
+        this.speedEl.textContent = this.formatNumber(stats.avgSpeed);
 
-        this.foodGreenEl.textContent = stats.foodCount.green.toString();
-        this.foodBlueEl.textContent = stats.foodCount.blue.toString();
-        this.foodPinkEl.textContent = stats.foodCount.pink.toString();
+        this.foodGreenEl.textContent = this.formatNumber(stats.foodCount?.green);
+        this.foodBlueEl.textContent = this.formatNumber(stats.foodCount?.blue);
+        this.foodPinkEl.textContent = this.formatNumber(stats.foodCount?.pink);
+    }
+
+    public setSelectedSnake(snake: PauseSnake, index: number, total: number) {
+        const isSelf = snake.kind === 'self';
+        this.selectedSnakeNameEl.textContent = isSelf ? `YOU · ${snake.name}` : snake.name;
+        this.selectedSnakeMetaEl.textContent = `${isSelf ? 'YOUR SNAKE' : snake.kind.toUpperCase()} · ${index + 1}/${total} · A / D`;
+        this.appearancePanel.classList.toggle('readonly', !isSelf);
+        this.previewAppearance = { ...snake.appearance };
+        if (isSelf) {
+            this.seedInput.value = String(this.appearance.patternSeed);
+            this.backgroundInput.value = this.appearance.backgroundColor;
+            this.patternInput.value = this.appearance.patternColor;
+        }
+        this.drawPattern();
+        this.updateStats(snake.stats);
     }
 
     private createColorInput(labelText: string, value: string): HTMLInputElement {
@@ -508,6 +548,7 @@ export class PauseUI {
             backgroundColor: this.backgroundInput.value,
             patternColor: this.patternInput.value,
         };
+        this.previewAppearance = { ...this.appearance };
         this.seedInput.value = String(this.appearance.patternSeed);
         this.drawPattern();
         this.onAppearanceChange({ ...this.appearance });
@@ -516,16 +557,17 @@ export class PauseUI {
     private drawPattern() {
         const context = this.patternCanvas.getContext('2d');
         if (!context) return;
-        const pattern = generateSnakePattern(this.appearance.patternSeed);
+        const pattern = generateSnakePattern(this.previewAppearance.patternSeed);
         const cell = this.patternCanvas.width / pattern.length;
         pattern.forEach((row, y) => row.forEach((filled, x) => {
-            context.fillStyle = filled ? this.appearance.patternColor : this.appearance.backgroundColor;
+            context.fillStyle = filled ? this.previewAppearance.patternColor : this.previewAppearance.backgroundColor;
             context.fillRect(x * cell, y * cell, cell + 0.5, cell + 0.5);
         }));
     }
 
     public setAppearance(appearance: SnakeAppearance) {
         this.appearance = { ...appearance };
+        this.previewAppearance = { ...appearance };
         this.seedInput.value = String(appearance.patternSeed);
         this.backgroundInput.value = appearance.backgroundColor;
         this.patternInput.value = appearance.patternColor;
@@ -563,6 +605,10 @@ export class PauseUI {
         const m = Math.floor(seconds / 60);
         const s = Math.floor(seconds % 60);
         return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+
+    private formatNumber(value: number | undefined): string {
+        return value === undefined ? '—' : Math.round(value).toString();
     }
 
     public show() {
