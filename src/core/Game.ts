@@ -151,6 +151,8 @@ export class Game {
   private liveStateTicks = new Map<string, number>();
   private lastLiveTick: number | null = null;
   private spectatorBanner: HTMLDivElement | null = null;
+  private spectatorCameraMode: 'free' | 'follow' = 'free';
+  private spectatorTargetIndex = 0;
   private playerTick = 0;
   private localInputSeq = 0;
   private localStateSeq = 0;
@@ -481,6 +483,20 @@ export class Game {
     this.input.on('rollLeft', () => handleTurn(() => this.snake.roll(-Math.PI / 2)));
     this.input.on('rollRight', () => handleTurn(() => this.snake.roll(Math.PI / 2)));
     this.input.on('pause', () => this.togglePause()); // Escape key
+    this.input.on('spectatorFreeCamera', (isRepeat) => {
+      if (!isRepeat && this.isSpectating) this.setSpectatorCameraMode('free');
+    });
+    this.input.on('spectatorFollowCamera', (isRepeat) => {
+      if (!isRepeat && this.isSpectating) this.setSpectatorCameraMode('follow');
+    });
+    this.input.on('spectatorPrevious', (isRepeat) => {
+      if (!isRepeat && this.isSpectating && this.spectatorCameraMode === 'follow')
+        this.changeSpectatorTarget(-1);
+    });
+    this.input.on('spectatorNext', (isRepeat) => {
+      if (!isRepeat && this.isSpectating && this.spectatorCameraMode === 'follow')
+        this.changeSpectatorTarget(1);
+    });
   }
 
   /**
@@ -623,9 +639,9 @@ export class Game {
     // Снимаем флаг ожидания старта
     this.isWaitingForStart = false;
     if (this.isSpectating) {
-      this.cameraController.setOrbitMode(
-        new THREE.Vector3(WORLD_SIZE / 2, WORLD_SIZE / 2, WORLD_SIZE / 2),
-      );
+      this.spectatorCameraMode = 'free';
+      this.spectatorTargetIndex = 0;
+      this.cameraController.setFreeMode(this.spectatorFreeCameraCenter());
       this.showSpectatorBanner();
     } else {
       this.cameraController.stopOrbitMode();
@@ -639,8 +655,71 @@ export class Game {
   private showSpectatorBanner(): void {
     this.spectatorBanner = document.createElement('div');
     this.spectatorBanner.className = 'spectator-banner';
-    this.spectatorBanner.textContent = `SPECTATING ROOM ${this.currentSeed}`;
     document.body.appendChild(this.spectatorBanner);
+    this.updateSpectatorBanner();
+  }
+
+  private spectatorFreeCameraCenter(): THREE.Vector3 {
+    return new THREE.Vector3(WORLD_SIZE / 2, WORLD_SIZE / 2, WORLD_SIZE / 2);
+  }
+
+  private setSpectatorCameraMode(mode: 'free' | 'follow'): void {
+    this.spectatorCameraMode = mode;
+    if (mode === 'free') this.cameraController.setFreeMode(this.spectatorFreeCameraCenter());
+    this.updateSpectatorBanner();
+  }
+
+  private changeSpectatorTarget(direction: -1 | 1): void {
+    const targets = this.getSpectatorTargets();
+    if (!targets.length) return;
+    this.spectatorTargetIndex =
+      (this.spectatorTargetIndex + direction + targets.length) % targets.length;
+    this.updateSpectatorBanner();
+  }
+
+  private getSpectatorTargets(): Array<{
+    head: THREE.Vector3;
+    direction: THREE.Quaternion;
+    name: string;
+  }> {
+    return [
+      ...this.liveOpponents
+        .filter((opponent) => opponent.segments.length > 0)
+        .map((opponent) => ({
+          head: opponent.segments[0],
+          direction: opponent.direction,
+          name: opponent.name,
+        })),
+      ...this.phantoms.map((phantom) => ({
+        head: phantom.getHead(),
+        direction: phantom.direction,
+        name: phantom.replayPlayer.getPlayerName(),
+      })),
+    ];
+  }
+
+  private updateSpectatorBanner(): void {
+    if (!this.spectatorBanner) return;
+    const targets = this.getSpectatorTargets();
+    const target = targets.length
+      ? targets[((this.spectatorTargetIndex % targets.length) + targets.length) % targets.length]
+      : undefined;
+    const mode =
+      this.spectatorCameraMode === 'free'
+        ? 'FREE CAMERA'
+        : `FOLLOWING ${target?.name ?? 'NO PLAYER'}`;
+    this.spectatorBanner.textContent = `SPECTATING ROOM ${this.currentSeed} · ${mode} · W FREE · S FOLLOW · A/D TARGET`;
+  }
+
+  private updateSpectatorFreeCamera(delta: number): void {
+    if (this.input.isLeftMouseDown) {
+      this.cameraController.setManualControlActive(true);
+      const { x, y } = this.input.getAndResetMouseDelta();
+      this.cameraController.applyManualMovement(x, y, 0.005);
+    } else {
+      this.cameraController.setManualControlActive(false);
+    }
+    this.cameraController.updateFree(delta);
   }
 
   private applyLiveSnapshot(snapshot: RoomSnapshot) {
@@ -1090,9 +1169,18 @@ export class Game {
 
     if (this.isSpectating) {
       this.advanceLiveOpponents(delta);
-      const focus =
-        this.liveOpponents[0]?.segments[0] ?? this.phantoms[0]?.getHead() ?? this.snake.getHead();
-      this.cameraController.update(delta, focus, this.snake.direction, 0);
+      if (this.spectatorCameraMode === 'free') {
+        this.updateSpectatorFreeCamera(delta);
+      } else {
+        const targets = this.getSpectatorTargets();
+        const target = targets[this.spectatorTargetIndex % targets.length];
+        if (target) {
+          this.cameraController.setManualControlActive(false);
+          this.cameraController.update(delta, target.head, target.direction, 0);
+        } else {
+          this.updateSpectatorFreeCamera(delta);
+        }
+      }
       this.particleSystem.update(delta);
       return;
     }

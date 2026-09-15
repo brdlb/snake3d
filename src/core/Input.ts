@@ -1,4 +1,14 @@
-type KeyAction = 'left' | 'right' | 'rollLeft' | 'rollRight' | 'boost' | 'pause';
+type KeyAction =
+    | 'left'
+    | 'right'
+    | 'rollLeft'
+    | 'rollRight'
+    | 'boost'
+    | 'pause'
+    | 'spectatorPrevious'
+    | 'spectatorNext'
+    | 'spectatorFreeCamera'
+    | 'spectatorFollowCamera';
 
 export class InputManager {
     private keys: Map<string, boolean> = new Map();
@@ -8,10 +18,12 @@ export class InputManager {
         'KeyQ': 'rollLeft',
         'KeyE': 'rollRight',
         'Space': 'boost',
-        'Escape': 'pause'
+        'Escape': 'pause',
+        'KeyW': 'spectatorFreeCamera',
+        'KeyS': 'spectatorFollowCamera'
     };
 
-    private actionCallbacks: Map<KeyAction, Set<() => void>> = new Map();
+    private actionCallbacks: Map<KeyAction, Set<(isRepeat: boolean) => void>> = new Map();
 
     private touchStartX: number = 0;
     private touchStartY: number = 0;
@@ -51,9 +63,15 @@ export class InputManager {
     private onKeyDown(event: KeyboardEvent): void {
         this.keys.set(event.code, true);
 
+        if (event.code === 'KeyA') {
+            this.triggerAction('spectatorPrevious', event.repeat);
+        } else if (event.code === 'KeyD') {
+            this.triggerAction('spectatorNext', event.repeat);
+        }
+
         const action = this.bindings[event.code];
         if (action) {
-            this.triggerAction(action);
+            this.triggerAction(action, event.repeat);
         }
     }
 
@@ -163,24 +181,24 @@ export class InputManager {
         return false;
     }
 
-    public on(action: KeyAction, callback: () => void): void {
+    public on(action: KeyAction, callback: (isRepeat: boolean) => void): void {
         if (!this.actionCallbacks.has(action)) {
             this.actionCallbacks.set(action, new Set());
         }
         this.actionCallbacks.get(action)!.add(callback);
     }
 
-    public off(action: KeyAction, callback: () => void): void {
+    public off(action: KeyAction, callback: (isRepeat: boolean) => void): void {
         const callbacks = this.actionCallbacks.get(action);
         if (callbacks) {
             callbacks.delete(callback);
         }
     }
 
-    private triggerAction(action: KeyAction): void {
+    private triggerAction(action: KeyAction, isRepeat: boolean = false): void {
         const callbacks = this.actionCallbacks.get(action);
         if (callbacks) {
-            callbacks.forEach(cb => cb());
+            callbacks.forEach(cb => cb(isRepeat));
         }
     }
 

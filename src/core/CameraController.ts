@@ -148,6 +148,28 @@ export class CameraController {
         // The normal update loop will overwrite rig quaternion anyway.
     }
 
+    public setFreeMode(center: THREE.Vector3) {
+        this.isOrbiting = false;
+        this.cameraRig.position.copy(center);
+        this.smoothedRigQuaternion.identity();
+        this.manualYaw = 0;
+        this.manualPitch = 0;
+        this.isManualActive = false;
+    }
+
+    public updateFree(delta: number) {
+        const qYaw = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(0, 1, 0),
+            this.manualYaw,
+        );
+        const qPitch = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(1, 0, 0),
+            this.manualPitch,
+        );
+        this.cameraRig.quaternion.copy(qYaw).multiply(qPitch);
+        this.updateCameraFromRig(delta);
+    }
+
     public setManualControlActive(active: boolean) {
         this.isManualActive = active;
     }
