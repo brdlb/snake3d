@@ -49,18 +49,31 @@ function mulberry32(seed: number) {
   };
 }
 
-/** Generates one quadrant and mirrors it across both axes. */
+/**
+ * Generates one eighth of the pattern and reflects it across the central
+ * axes and both diagonals. Thus the value at (x, y) always matches (y, x).
+ */
 export function generateSnakePattern(seed: number, size = 7): boolean[][] {
   if (size < 3 || size % 2 === 0) throw new Error('Pattern size must be odd and at least 3');
   const pattern = Array.from({ length: size }, () => Array<boolean>(size).fill(false));
   const center = Math.floor(size / 2);
   const random = mulberry32(seed >>> 0);
   const setMirrored = (x: number, y: number, value: boolean) => {
-    for (const px of new Set([x, size - 1 - x]))
-      for (const py of new Set([y, size - 1 - y])) pattern[py][px] = value;
+    const reflectedX = size - 1 - x;
+    const reflectedY = size - 1 - y;
+    for (const [px, py] of [
+      [x, y],
+      [y, x],
+      [reflectedX, y],
+      [reflectedY, x],
+      [x, reflectedY],
+      [y, reflectedX],
+      [reflectedX, reflectedY],
+      [reflectedY, reflectedX],
+    ]) pattern[py][px] = value;
   };
   for (let y = 0; y <= center; y++) {
-    for (let x = 0; x <= center; x++) {
+    for (let x = y; x <= center; x++) {
       const neighbor = (x > 0 && pattern[y][x - 1]) || (y > 0 && pattern[y - 1][x]);
       setMirrored(x, y, (x === center && y === center) || random() < (neighbor ? 0.6 : 0.35));
     }

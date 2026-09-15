@@ -9,6 +9,7 @@ describe('snake appearance', () => {
     for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) {
       expect(pattern[y][x]).toBe(pattern[y][6 - x]);
       expect(pattern[y][x]).toBe(pattern[6 - y][x]);
+      expect(pattern[y][x]).toBe(pattern[x][y]);
     }
     expect(snakePatternBits(123456)).toBe(snakePatternBits(123456));
   });
