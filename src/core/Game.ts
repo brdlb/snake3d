@@ -11,7 +11,7 @@ import { SettingsManager } from './SettingsManager';
 import { SceneManager } from '../graphics/SceneManager';
 import { CameraController } from './CameraController';
 import { PostProcessManager } from '../graphics/PostProcessManager';
-import { getRenderableSegmentCount } from '../graphics/SnakeRendering';
+import { getRenderableSegmentIndices } from '../graphics/SnakeRendering';
 import { SettingsUI } from '../ui/SettingsUI';
 import { GameOverUI } from '../ui/GameOverUI';
 import { GameHUD } from '../ui/GameHUD';
@@ -1740,19 +1740,24 @@ export class Game {
     if (this.foodMesh.instanceColor) this.foodMesh.instanceColor.needsUpdate = true;
 
     // Update Snake InstancedMesh
-    const count = this.isSpectating ? 0 : getRenderableSegmentCount(this.snake.segments);
+    const occupiedSnakePositions = new Set<string>();
+    const localSegmentIndices = this.isSpectating
+      ? []
+      : getRenderableSegmentIndices(this.snake.segments, occupiedSnakePositions);
+    const count = localSegmentIndices.length;
     this.snakeMesh.count = count;
 
     // Prune old pulses
     this.pulses = this.pulses.filter((p) => (this.time - p.startTime) * p.speed < count + 10);
 
-    for (let i = 0; i < count; i++) {
-      const segment = this.snake.segments[i];
+    for (let instanceIndex = 0; instanceIndex < count; instanceIndex++) {
+      const segmentIndex = localSegmentIndices[instanceIndex];
+      const segment = this.snake.segments[segmentIndex];
 
       this.dummy.position.copy(segment);
       this.dummy.rotation.set(0, 0, 0);
 
-      if (i === 0) {
+      if (segmentIndex === 0) {
         // Head
         this.dummy.quaternion.copy(this.snake.direction);
         this.dummy.scale.set(1, 1, 1);
@@ -1766,7 +1771,7 @@ export class Game {
       // Apply Pulses
       for (const pulse of this.pulses) {
         const dist = (this.time - pulse.startTime) * pulse.speed;
-        const segmentPos = i; // Distance from head is index i
+        const segmentPos = segmentIndex;
         const diff = Math.abs(segmentPos - dist);
         const width = 2.0;
 
@@ -1778,9 +1783,9 @@ export class Game {
       }
 
       this.dummy.updateMatrix();
-      this.snakeMesh.setMatrixAt(i, this.dummy.matrix);
+      this.snakeMesh.setMatrixAt(instanceIndex, this.dummy.matrix);
       const localAppearance = { ...this.appearance, backgroundColor: '#' + this._color.clone().multiply(new THREE.Color(this.appearance.backgroundColor)).getHexString() };
-      setSnakePatternAt(this.snakeMesh, i, localAppearance);
+      setSnakePatternAt(this.snakeMesh, instanceIndex, localAppearance);
     }
 
     this.snakeMesh.instanceMatrix.needsUpdate = true;
@@ -1793,13 +1798,17 @@ export class Game {
       for (const phantom of this.phantoms) {
         // Dead phantoms stay visible on the field (they just stop moving)
 
-        for (let i = 0; i < phantom.segments.length; i++) {
-          const segment = phantom.segments[i];
+        const renderableIndices = getRenderableSegmentIndices(
+          phantom.segments,
+          occupiedSnakePositions,
+        );
+        for (const segmentIndex of renderableIndices) {
+          const segment = phantom.segments[segmentIndex];
 
           this.dummy.position.copy(segment);
           this.dummy.rotation.set(0, 0, 0);
 
-          if (i === 0) {
+          if (segmentIndex === 0) {
             // Phantom head
             this.dummy.quaternion.copy(phantom.direction);
           }
@@ -1813,11 +1822,14 @@ export class Game {
         }
       }
       for (const opponent of this.liveOpponents) {
-        const renderableCount = getRenderableSegmentCount(opponent.segments);
-        for (let i = 0; i < renderableCount; i++) {
-          this.dummy.position.copy(opponent.segments[i]);
+        const renderableIndices = getRenderableSegmentIndices(
+          opponent.segments,
+          occupiedSnakePositions,
+        );
+        for (const segmentIndex of renderableIndices) {
+          this.dummy.position.copy(opponent.segments[segmentIndex]);
           this.dummy.rotation.set(0, 0, 0);
-          if (i === 0) this.dummy.quaternion.copy(opponent.direction);
+          if (segmentIndex === 0) this.dummy.quaternion.copy(opponent.direction);
           this.dummy.scale.set(1, 1, 1);
           this.dummy.updateMatrix();
           this.phantomMesh.setMatrixAt(phantomInstanceIndex, this.dummy.matrix);

@@ -1,12 +1,20 @@
 import * as THREE from 'three';
 
-/**
- * Network length updates temporarily extend a snake by cloning its tail.
- * Keep those pending-growth clones in simulation state, but render only one
- * instance at the shared tail position to avoid coplanar geometry.
- */
-export function getRenderableSegmentCount(segments: readonly THREE.Vector3[]): number {
-  let count = segments.length;
-  while (count > 1 && segments[count - 1].equals(segments[count - 2])) count--;
-  return count;
+function segmentKey(segment: THREE.Vector3): string {
+  return `${segment.x},${segment.y},${segment.z}`;
+}
+
+/** Returns segments that can be drawn without coplanar boxes at one position. */
+export function getRenderableSegmentIndices(
+  segments: readonly THREE.Vector3[],
+  occupiedPositions: Set<string> = new Set(),
+): number[] {
+  const indices: number[] = [];
+  for (let index = 0; index < segments.length; index++) {
+    const key = segmentKey(segments[index]);
+    if (occupiedPositions.has(key)) continue;
+    occupiedPositions.add(key);
+    indices.push(index);
+  }
+  return indices;
 }

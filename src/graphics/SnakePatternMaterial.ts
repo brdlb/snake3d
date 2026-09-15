@@ -30,7 +30,11 @@ const fragmentShader = `
     vec2 cell = floor(patternUv * 7.0);
     vec2 mirrored = min(cell, vec2(6.0) - cell);
     float bitIndex = mirrored.y * 4.0 + mirrored.x;
-    float ornament = mod(floor(patternBits / exp2(bitIndex)), 2.0);
+    // An instanced attribute still arrives through a smoothly interpolated
+    // varying. Restore the integer mask before bit extraction: tiny rasterizer
+    // errors around exact powers of two otherwise turn solid cells into lines.
+    float stablePatternBits = floor(patternBits + 0.5);
+    float ornament = mod(floor(stablePatternBits / exp2(bitIndex)), 2.0);
     gl_FragColor = vec4(mix(backgroundColor, ornamentColor, ornament), opacity);
   }
 `;
