@@ -2,6 +2,7 @@ import { GameStats } from './PauseUI';
 
 export class GameOverUI {
     private container!: HTMLElement;
+    private content!: HTMLElement;
     private restartBtn!: HTMLButtonElement;
     private nextBtn!: HTMLButtonElement;
     private errorEl!: HTMLElement;
@@ -22,6 +23,8 @@ export class GameOverUI {
     private onRestart: () => void;
     private onNext: () => void;
     private onLeaderboard: () => void;
+    private resizeObserver?: ResizeObserver;
+    private readonly onWindowResize = () => this.updateScale();
 
     constructor(onRestart: () => void, onNext: () => void, onLeaderboard: () => void) {
         this.onRestart = onRestart;
@@ -33,6 +36,9 @@ export class GameOverUI {
     private createUI() {
         this.container = document.createElement('div');
         this.container.className = 'game-over-screen';
+
+        this.content = document.createElement('div');
+        this.content.className = 'game-over-content';
 
         const title = document.createElement('h1');
         title.className = 'game-over-title';
@@ -59,7 +65,7 @@ export class GameOverUI {
         titlePanel.className = 'game-over-panel';
         titlePanel.appendChild(title);
 
-        this.container.appendChild(titlePanel);
+        this.content.appendChild(titlePanel);
 
         // Stats Panel
         const statsPanel = document.createElement('div');
@@ -93,7 +99,7 @@ export class GameOverUI {
         statsInner.appendChild(foodRow);
 
         statsPanel.appendChild(statsInner);
-        this.container.appendChild(statsPanel);
+        this.content.appendChild(statsPanel);
 
 
 
@@ -112,26 +118,34 @@ export class GameOverUI {
             }
         });
 
-        this.container.appendChild(leadersBtn);
+        this.content.appendChild(leadersBtn);
 
         this.nextBtn.style.transitionDelay = '0.3s';
-        this.container.appendChild(this.nextBtn);
+        this.content.appendChild(this.nextBtn);
 
         // Update restart button delay to come after leaderboard
         this.restartBtn.style.transitionDelay = '0.4s';
-        this.container.appendChild(this.restartBtn);
+        this.content.appendChild(this.restartBtn);
 
         this.errorEl = document.createElement('p');
         this.errorEl.className = 'game-over-error';
         this.errorEl.hidden = true;
-        this.container.appendChild(this.errorEl);
+        this.content.appendChild(this.errorEl);
 
         this.saveStatusEl = document.createElement('p');
         this.saveStatusEl.className = 'game-over-save-status';
         this.saveStatusEl.hidden = true;
-        this.container.appendChild(this.saveStatusEl);
+        this.content.appendChild(this.saveStatusEl);
+
+        this.container.appendChild(this.content);
 
         document.body.appendChild(this.container);
+
+        this.resizeObserver = new ResizeObserver(() => this.updateScale());
+        this.resizeObserver.observe(this.container);
+        this.resizeObserver.observe(this.content);
+        window.addEventListener('resize', this.onWindowResize);
+        void document.fonts?.ready.then(() => this.updateScale());
 
         this.injectStyles();
     }
@@ -221,6 +235,16 @@ export class GameOverUI {
             .leaders-btn:hover {
                 background: #1a1a1a;
             }
+
+            .game-over-content {
+                --game-over-scale: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: flex-start;
+                transform: scale(var(--game-over-scale));
+                transform-origin: left center;
+                transition: transform 0.15s ease-out;
+            }
             .game-over-error { color: #ff7575; font-family: 'Jura', sans-serif; font-weight: 700; }
             .game-over-save-status { color: #86efac; font-family: 'Jura', sans-serif; font-weight: 700; }
         `;
@@ -250,6 +274,7 @@ export class GameOverUI {
         this.saveStatusEl.hidden = true;
         this.saveStatusEl.textContent = '';
         this.container.classList.add('active');
+        requestAnimationFrame(() => this.updateScale());
     }
 
     public setLoading(loading: boolean, error?: string) {
@@ -259,11 +284,13 @@ export class GameOverUI {
         this.nextBtn.textContent = loading ? 'PLEASE WAIT…' : 'NEXT';
         this.errorEl.hidden = !error;
         this.errorEl.textContent = error ?? '';
+        requestAnimationFrame(() => this.updateScale());
     }
 
     public setSaveStatus(message: string) {
         this.saveStatusEl.hidden = false;
         this.saveStatusEl.textContent = message;
+        requestAnimationFrame(() => this.updateScale());
     }
 
     public hide() {
@@ -271,6 +298,25 @@ export class GameOverUI {
     }
 
     public dispose() {
+        this.resizeObserver?.disconnect();
+        window.removeEventListener('resize', this.onWindowResize);
         this.container.remove();
+    }
+
+    private updateScale() {
+        const horizontalPadding = 16;
+        const verticalPadding = 16;
+        const contentWidth = this.content.offsetWidth;
+        const contentHeight = this.content.offsetHeight;
+
+        if (!contentWidth || !contentHeight) return;
+
+        const scale = Math.min(
+            1,
+            Math.max(0, (this.container.clientWidth - horizontalPadding) / contentWidth),
+            Math.max(0, (this.container.clientHeight - verticalPadding) / contentHeight),
+        );
+
+        this.content.style.setProperty('--game-over-scale', scale.toString());
     }
 }
