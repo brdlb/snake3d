@@ -1,5 +1,5 @@
 import type { RoomData, RoomSummary } from '../types/replay';
-import { isRealtimeServerMessage, type DeathInput, type DirectionInput, type RealtimeClientMessage, type StateInput } from '../../shared/realtime';
+import { isRealtimeServerMessage, type DeathInput, type DirectionInput, type PauseInput, type RealtimeClientMessage, type StateInput } from '../../shared/realtime';
 import type { SnakeAppearance } from '../../shared/appearance';
 export type RoomAction = 'initial' | 'resume' | 'restart' | 'next' | 'join' | 'spectate';
 
@@ -35,6 +35,7 @@ export class NetworkManager {
   private openRoomSocket(seed:number, spectating=false, restarting=false) { const previous=this.socket; if(this.heartbeat!==null)window.clearInterval(this.heartbeat); this.heartbeat=null; const url=new URL(`${this.apiBase}/api/v1/rooms/${seed}/socket`);if(spectating)url.searchParams.set('spectator','1');if(restarting)url.searchParams.set('restart','1');url.protocol=url.protocol==='https:'?'wss:':'ws:'; const socket=this.socket=new WebSocket(url); previous?.close(); socket.onopen=()=>{if(this.socket!==socket)return;this.retries=0;this.roomIsRestarting=false;this.sendRealtime({v:2,type:'room.resync'});this.heartbeat=window.setInterval(()=>this.sendRealtime({v:2,type:'ping'}),15000);this.emit('roomSocketConnected');}; socket.onmessage=(event)=>{if(this.socket!==socket)return;try{const message:unknown=JSON.parse(event.data);if(isRealtimeServerMessage(message)){console.log(`[Network] Server event: ${message.type}`, 'payload' in message ? message.payload : message);this.emit(message.type,'payload' in message?message.payload:message);}}catch(error){console.warn('[Network] Invalid server message:',event.data,error);}}; socket.onclose=()=>{if(this.socket!==socket)return;if(this.heartbeat!==null)window.clearInterval(this.heartbeat);this.heartbeat=null;this.scheduleReconnect();}; socket.onerror=()=>socket.close(); }
   private sendRealtime(message: RealtimeClientMessage) { if(this.socket?.readyState===WebSocket.OPEN)this.socket.send(JSON.stringify(message)); }
   sendDirection(action: DirectionInput) { this.sendRealtime({v:2,type:'player.directionChanged',payload:{action}}); }
+  sendPause(action: PauseInput) { this.sendRealtime({v:2,type:'player.pauseChanged',payload:{action}}); }
   sendPlayerState(action: StateInput) { this.sendRealtime({v:2,type:'player.state',payload:{action}}); }
   sendPlayerDeath(action: DeathInput) { this.sendRealtime({v:2,type:'player.died',payload:{action}}); }
   sendAppearance(appearance: SnakeAppearance) { this.sendRealtime({v:2,type:'player.appearance',payload:{appearance}}); }

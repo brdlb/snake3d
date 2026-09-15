@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import type { SimPlayer } from '../../shared/simulation';
 import {
   advanceLiveOpponent,
+  advanceLiveOpponents,
   applyLiveDirectionState,
   findLocalPlayer,
   isLiveOpponent,
@@ -19,6 +20,7 @@ const player = (id: string, entityId: string): SimPlayer => ({
   speed: 300,
   growth: 0,
   alive: true,
+  paused: false,
   color: '#ffffff',
   nextStepAt: 0,
 });
@@ -37,6 +39,7 @@ describe('live player identity', () => {
 describe('live opponent movement', () => {
   const opponent = (alive = true) => ({
     alive,
+    paused: false,
     speed: 300,
     segments: [
       new THREE.Vector3(5, 5, 5),
@@ -73,6 +76,29 @@ describe('live opponent movement', () => {
 
     expect(remote.segments[0]).toEqual(new THREE.Vector3(5, 5, 5));
     expect(remote.serverTick).toBe(0);
+  });
+
+  it('does not extrapolate a paused player, then resumes normally', () => {
+    const remote = opponent();
+    remote.paused = true;
+
+    advanceLiveOpponent(remote, 1, orientation);
+    expect(remote.segments[0]).toEqual(new THREE.Vector3(5, 5, 5));
+
+    remote.paused = false;
+    advanceLiveOpponent(remote, 0.2, orientation);
+    expect(remote.segments[0]).toEqual(new THREE.Vector3(5, 5, 6));
+  });
+
+  it('advances only unpaused remote opponents in a shared frame', () => {
+    const paused = opponent();
+    const moving = opponent();
+    paused.paused = true;
+
+    advanceLiveOpponents([paused, moving], 0.2, orientation);
+
+    expect(paused.segments[0]).toEqual(new THREE.Vector3(5, 5, 5));
+    expect(moving.segments[0]).toEqual(new THREE.Vector3(5, 5, 6));
   });
 
   it('replaces the complete body on a direction checkpoint before extrapolating', () => {

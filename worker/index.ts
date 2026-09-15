@@ -11,6 +11,7 @@ import {
   type SimulationState,
 } from '../shared/simulation';
 import { DEFAULT_SNAKE_APPEARANCE, isSnakeAppearance, normalizeSnakeAppearance, type SnakeAppearance } from '../shared/appearance';
+import type { PauseInput } from '../shared/realtime';
 import type {
   DeathInput,
   DirectionInput,
@@ -159,6 +160,11 @@ function stateInput(value: unknown): value is StateInput {
       action.reason === 'spawn' ||
       action.reason === 'spectator-sync')
   );
+}
+function pauseInput(value: unknown): value is PauseInput {
+  if (!snakeState(value)) return false;
+  const action = value as Record<string, unknown>;
+  return action.type === 'pause' && sequence(action.seq) && sequence(action.step) && typeof action.paused === 'boolean';
 }
 function deathInput(value: unknown): value is DeathInput {
   if (!snakeState(value)) return false;
@@ -610,6 +616,7 @@ export class RoomDurableObject {
   private async loadState(seed: number) {
     this.simulation ??=
       (await this.ctx.storage.get<SimulationState>('simulation')) ?? createSimulation(seed);
+    for (const player of Object.values(this.simulation.players)) player.paused ??= false;
     return this.simulation;
   }
   private async prepareState(seed: number) {
@@ -1175,6 +1182,38 @@ export class RoomDurableObject {
               seq: action.seq,
               step: action.step,
               reason: action.reason,
+              serverTime: Date.now(),
+            },
+          },
+          ws,
+        );
+        return;
+      }
+      /** UC 1: persist and broadcast a pause checkpoint without recording replay trajectory. */
+      if (event.type === 'player.pauseChanged' && pauseInput(action)) {
+        if (action.seq <= (player.lastStateSeq ?? -1)) return;
+        player.segments = action.segments;
+        player.direction = action.direction;
+        player.up = action.up;
+        player.score = action.score;
+        player.speed = action.speed;
+        player.paused = action.paused;
+        player.lastStateSeq = action.seq;
+        await this.persist(state);
+        this.broadcast(
+          {
+            v: 2,
+            type: 'player.pauseChanged',
+            payload: {
+              entityId: player.entityId,
+              seq: action.seq,
+              step: action.step,
+              paused: player.paused,
+              segments: player.segments,
+              direction: player.direction,
+              up: player.up,
+              score: player.score,
+              speed: player.speed,
               serverTime: Date.now(),
             },
           },

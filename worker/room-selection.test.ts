@@ -322,6 +322,57 @@ describe('room state preparation', () => {
     });
   });
 
+  it('persists and broadcasts a pause checkpoint without changing replay trajectory', async () => {
+    const state = createSimulation(123);
+    const player = addPlayer(state, 'player-1', 'Player', 0, {
+      entityId: 'entity-1',
+      instanceId: 'connection-1',
+    });
+    state.trajectories = {
+      'player-1': {
+        startPosition: { ...player.segments[0] },
+        startDirection: { ...player.direction },
+        spawnIndex: 0,
+        initialSpeed: player.speed,
+        changes: [],
+      },
+    };
+    const sender = {
+      deserializeAttachment: () => ({
+        userId: 'player-1', entityId: 'entity-1', seed: 123, instanceId: 'connection-1',
+      }),
+      send: vi.fn(), close: vi.fn(),
+    };
+    const peer = { deserializeAttachment: () => ({}), send: vi.fn(), close: vi.fn() };
+    const storage = { put: vi.fn(), deleteAlarm: vi.fn() };
+    const object = new RoomDurableObject({ storage, getWebSockets: () => [sender, peer] } as any, {} as any);
+    (object as any).simulation = state;
+
+    const pause = (seq: number, paused: unknown) => JSON.stringify({
+      v: 2,
+      type: 'player.pauseChanged',
+      payload: { action: {
+        type: 'pause', seq, step: 5, paused,
+        segments: player.segments, direction: player.direction, up: player.up,
+        score: player.score, speed: player.speed,
+      } },
+    });
+    await object.webSocketMessage(sender as any, pause(1, true));
+    await object.webSocketMessage(sender as any, pause(1, false));
+    await object.webSocketMessage(sender as any, pause(2, 'invalid'));
+
+    expect(player.paused).toBe(true);
+    expect(state.trajectories['player-1'].changes).toEqual([]);
+    expect(storage.put).toHaveBeenCalledWith('simulation', state);
+    expect(JSON.parse(peer.send.mock.calls[0][0])).toMatchObject({
+      type: 'player.pauseChanged', payload: { entityId: 'entity-1', paused: true, seq: 1 },
+    });
+    expect(JSON.parse(sender.send.mock.calls[0][0])).toMatchObject({
+      type: 'error', payload: { code: 'INVALID_MESSAGE' },
+    });
+    expect((object as any).snapshot(state).players[0].paused).toBe(true);
+  });
+
   it('rejects invalid direction segments and ignores an old sequence', async () => {
     const state = createSimulation(123);
     const player = addPlayer(state, 'player-1', 'Player', 0, {

@@ -1,10 +1,11 @@
 import type { SimPlayer } from '../../shared/simulation';
-import type { PlayerDirectionChanged } from '../../shared/realtime';
+import type { PlayerDirectionChanged, PlayerPauseChanged } from '../../shared/realtime';
 import * as THREE from 'three';
 import type { ReplayData } from '../types/replay';
 
 export type LiveOpponentMotion = {
   alive: boolean;
+  paused: boolean;
   speed: number;
   segments: THREE.Vector3[];
   direction: THREE.Quaternion;
@@ -21,7 +22,7 @@ export function advanceLiveOpponent(
   seconds: number,
   orientation: (direction: THREE.Vector3, up: THREE.Vector3) => THREE.Quaternion,
 ): void {
-  if (!opponent.alive || !opponent.segments.length) return;
+  if (!opponent.alive || opponent.paused || !opponent.segments.length) return;
   opponent.elapsed += seconds;
   const interval = 60 / Math.max(60, opponent.speed);
   while (opponent.elapsed >= interval) {
@@ -45,9 +46,17 @@ export function advanceLiveOpponent(
   }
 }
 
+export function advanceLiveOpponents(
+  opponents: LiveOpponentMotion[],
+  seconds: number,
+  orientation: (direction: THREE.Vector3, up: THREE.Vector3) => THREE.Quaternion,
+): void {
+  for (const opponent of opponents) advanceLiveOpponent(opponent, seconds, orientation);
+}
+
 export function applyLiveDirectionState(
   opponent: LiveOpponentMotion & { serverTime: number },
-  change: PlayerDirectionChanged,
+  change: PlayerDirectionChanged | PlayerPauseChanged,
   orientation: (direction: THREE.Vector3, up: THREE.Vector3) => THREE.Quaternion,
 ): void {
   opponent.segments = change.segments.map(

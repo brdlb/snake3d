@@ -30,6 +30,20 @@ describe('live room simulation', () => {
     expect(validOrientation({ x: 1, y: 0, z: 0 }, { x: 1, y: 0, z: 0 })).toBe(false);
   });
 
+  it('does not consume a paused player due step while another due player advances', () => {
+    const state = createSimulation(44);
+    const paused = addPlayer(state, 'paused', 'Paused', 0);
+    const moving = addPlayer(state, 'moving', 'Moving', 0, { spawnIndex: 1 });
+    paused.paused = true;
+    paused.nextStepAt = moving.nextStepAt = 1;
+
+    advanceSimulation(state, 1);
+
+    expect(paused.segments[0]).toEqual({ x: 5, y: 5, z: 5 });
+    expect(paused.nextStepAt).toBe(1);
+    expect(moving.segments[0]).not.toEqual({ x: 45, y: 5, z: 5 });
+  });
+
   it('simulates food and collision only on the server state', () => {
     const state = createSimulation(1);
     const p = addPlayer(state, 'a', 'A', 0, { segments: [{ x: 1, y: 1, z: 1 }, { x: 1, y: 1, z: 2 }, { x: 1, y: 1, z: 3 }], direction: { x: 1, y: 0, z: 0 } });

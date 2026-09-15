@@ -15,6 +15,7 @@ export type SimPlayer = {
   speed: number;
   growth: number;
   alive: boolean;
+  paused: boolean;
   phantom?: boolean;
   color: string;
   appearance?: SnakeAppearance;
@@ -173,6 +174,7 @@ export function addPlayer(
     speed: BASE_SPEED,
     growth: 0,
     alive: true,
+    paused: false,
     phantom: options.phantom,
     color: options.color ?? (options.phantom ? '#7dd3fc' : '#ffffff'),
     appearance: normalizeSnakeAppearance(options.appearance ?? (options.phantom ? {
@@ -245,7 +247,7 @@ export function stepSimulationDelta(
   at: number,
   allowDeaths = true,
 ): SimulationDelta | null {
-  const due = Object.values(state.players).filter((p) => p.alive && p.nextStepAt === at);
+  const due = Object.values(state.players).filter((p) => p.alive && !p.paused && p.nextStepAt === at);
   if (!due.length) return null;
   const heads = new Map(due.map((p) => [p.id, add(p.segments[0], p.direction)]));
   const foodAt = new Map(
@@ -320,7 +322,7 @@ export function advanceSimulation(
 ): SimulationDelta[] {
   const deltas: SimulationDelta[] = [];
   for (;;) {
-    const due = Object.values(state.players).filter((p) => p.alive && p.nextStepAt <= now);
+    const due = Object.values(state.players).filter((p) => p.alive && !p.paused && p.nextStepAt <= now);
     if (!due.length) break;
     const at = Math.min(...due.map((p) => p.nextStepAt));
     const delta = stepSimulationDelta(state, at, allowDeaths);

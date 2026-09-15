@@ -26,6 +26,13 @@ export type StateInput = SnakeState & {
   reason: 'food' | 'speed' | 'reconnect' | 'spawn' | 'spectator-sync';
 };
 
+export type PauseInput = SnakeState & {
+  type: 'pause';
+  seq: number;
+  step: number;
+  paused: boolean;
+};
+
 export type DeathInput = SnakeState & {
   type: 'death';
   seq: number;
@@ -55,6 +62,11 @@ export type PlayerStateChanged = SnakeState & {
   serverTime: number;
 };
 
+export type PlayerPauseChanged = Omit<PauseInput, 'type'> & {
+  entityId: string;
+  serverTime: number;
+};
+
 export type PlayerDied = {
   player: SimPlayer;
   position: Axis;
@@ -66,6 +78,7 @@ export type RealtimeClientMessage =
   | { v: 2; type: 'ping' | 'room.resync' }
   | { v: 2; type: 'player.appearance'; payload: { appearance: SnakeAppearance } }
   | { v: 2; type: 'player.directionChanged'; payload: { action: DirectionInput } }
+  | { v: 2; type: 'player.pauseChanged'; payload: { action: PauseInput } }
   | { v: 2; type: 'player.state'; payload: { action: StateInput } }
   | { v: 2; type: 'player.died'; payload: { action: DeathInput } };
 
@@ -74,6 +87,7 @@ export type RealtimeServerMessage =
   | { v: 2; type: 'room.state'; payload: RoomSnapshot }
   | { v: 2; type: 'room.syncRequested'; payload: { requestId: string } }
   | { v: 2; type: 'player.directionChanged'; payload: PlayerDirectionChanged }
+  | { v: 2; type: 'player.pauseChanged'; payload: PlayerPauseChanged }
   | { v: 2; type: 'player.state'; payload: PlayerStateChanged }
   | { v: 2; type: 'player.appearance'; payload: { entityId: string; appearance: SnakeAppearance } }
   | { v: 2; type: 'player.died'; payload: PlayerDied }

@@ -27,12 +27,13 @@ import { replaceRoomInAddress } from '../utils/RoomUrl';
 import type {
   PlayerDirectionChanged,
   PlayerDied,
+  PlayerPauseChanged,
   PlayerStateChanged,
   RoomSnapshot,
   SnakeState,
 } from '../../shared/realtime';
 import {
-  advanceLiveOpponent,
+  advanceLiveOpponents,
   applyLiveDirectionState,
   findLocalPlayer,
   isLiveOpponent,
@@ -101,6 +102,7 @@ export class Game {
     score: number;
     speed: number;
     alive: boolean;
+    paused: boolean;
     phantom: boolean;
     color: string;
     appearance: SnakeAppearance;
@@ -146,6 +148,7 @@ export class Game {
   private selectedRoomSeed: number | null = null;
   private initialSpectatorPromise: Promise<void> | null = null;
   private liveEventTicks = new Map<string, number>();
+  private liveStateTicks = new Map<string, number>();
   private lastLiveTick: number | null = null;
   private spectatorBanner: HTMLDivElement | null = null;
   private playerTick = 0;
@@ -362,7 +365,8 @@ export class Game {
       }
     });
     this.networkManager.on('roomSocketConnected', () => {
-      if (this.liveWorld && !this.isSpectating) this.sendLivePlayerState('reconnect');
+      if (this.liveWorld && !this.isSpectating)
+        this.isPaused ? this.sendLivePause() : this.sendLivePlayerState('reconnect');
     });
     this.networkManager.on('room.state', (snapshot: RoomSnapshot) =>
       this.applyLiveSnapshot(snapshot),
@@ -379,6 +383,9 @@ export class Game {
     });
     this.networkManager.on('player.directionChanged', (change: PlayerDirectionChanged) =>
       this.applyLiveDirection(change),
+    );
+    this.networkManager.on('player.pauseChanged', (change: PlayerPauseChanged) =>
+      this.applyLivePause(change),
     );
     this.networkManager.on('player.state', (change: PlayerStateChanged) =>
       this.applyLiveState(change),
@@ -646,6 +653,7 @@ export class Game {
       return;
     const me = this.networkManager.getUser()?.id;
     this.liveEventTicks.clear();
+    this.liveStateTicks.clear();
     this.lastLiveTick = snapshot.tick;
     this.world.foodPositions = snapshot.food.map(
       (food: any) => new THREE.Vector3(food.x, food.y, food.z),
@@ -688,6 +696,7 @@ export class Game {
       .filter((player: any) => isLiveOpponent(player, this.localEntityId, me))
       .map((player: any) => {
         this.liveEventTicks.set(player.entityId, player.lastInputSeq ?? -1);
+        this.liveStateTicks.set(player.entityId, player.lastStateSeq ?? -1);
         return this.createLiveOpponent(player, snapshot.tick, snapshot.serverTime);
       });
   }
@@ -726,6 +735,7 @@ export class Game {
       score: player.score ?? 0,
       speed: player.speed ?? 300,
       alive: player.alive !== false && !this.deadLivePhantoms.has(player.entityId ?? player.id),
+      paused: player.paused === true,
       phantom: player.phantom === true,
       color: player.color ?? '#ffffff',
       appearance: normalizeSnakeAppearance(player.appearance),
@@ -767,6 +777,9 @@ export class Game {
 
   private applyLiveState(change: PlayerStateChanged) {
     if (change.entityId === this.localEntityId) return;
+    const lastSeq = this.liveStateTicks.get(change.entityId);
+    if (lastSeq !== undefined && change.seq <= lastSeq) return;
+    this.liveStateTicks.set(change.entityId, change.seq);
     const opponent = this.liveOpponents.find((existing) => existing.id === change.entityId);
     if (!opponent) {
       this.networkManager.requestResync();
@@ -785,6 +798,23 @@ export class Game {
     opponent.elapsed = 0;
     opponent.serverTick = change.step;
     opponent.serverTime = change.serverTime;
+  }
+
+  private applyLivePause(change: PlayerPauseChanged) {
+    const entityId = change?.entityId;
+    if (!entityId || entityId === this.localEntityId) return;
+    const lastSeq = this.liveStateTicks.get(entityId);
+    if (lastSeq !== undefined && change.seq <= lastSeq) return;
+    this.liveStateTicks.set(entityId, change.seq);
+    const opponent = this.liveOpponents.find((existing) => existing.id === entityId);
+    if (!opponent) {
+      this.networkManager.requestResync();
+      return;
+    }
+    applyLiveDirectionState(opponent, change, (direction, up) =>
+      this.orientationQuaternion(direction, up),
+    );
+    opponent.paused = change.paused;
   }
 
   private livePlayerState(): SnakeState {
@@ -807,6 +837,16 @@ export class Game {
       seq: ++this.localStateSeq,
       step: this.playerTick,
       reason,
+      ...this.livePlayerState(),
+    });
+  }
+
+  private sendLivePause() {
+    this.networkManager.sendPause({
+      type: 'pause',
+      seq: ++this.localStateSeq,
+      step: this.playerTick,
+      paused: this.isPaused,
       ...this.livePlayerState(),
     });
   }
@@ -991,6 +1031,7 @@ export class Game {
     if (this.isGameOver || this.isWaitingForStart) return;
 
     this.isPaused = !this.isPaused;
+    if (this.liveWorld && !this.isSpectating) this.sendLivePause();
 
     if (this.isPaused) {
       this.pauseUI.updateStats(this.gameStats);
@@ -1028,6 +1069,13 @@ export class Game {
 
   private isGameOver: boolean = false;
 
+  private advanceLiveOpponents(delta: number) {
+    if (this.liveWorld)
+      advanceLiveOpponents(this.liveOpponents, delta, (direction, up) =>
+        this.orientationQuaternion(direction, up),
+      );
+  }
+
   private update(delta: number) {
     this.time += delta;
     if (!this.input.isActionPressed('boost')) this.restartKeyWasPressed = false;
@@ -1041,11 +1089,7 @@ export class Game {
     }
 
     if (this.isSpectating) {
-      if (this.liveWorld)
-        for (const opponent of this.liveOpponents)
-          advanceLiveOpponent(opponent, delta, (direction, up) =>
-            this.orientationQuaternion(direction, up),
-          );
+      this.advanceLiveOpponents(delta);
       const focus =
         this.liveOpponents[0]?.segments[0] ?? this.phantoms[0]?.getHead() ?? this.snake.getHead();
       this.cameraController.update(delta, focus, this.snake.direction, 0);
@@ -1054,6 +1098,7 @@ export class Game {
     }
 
     if (this.isGameOver) {
+      this.advanceLiveOpponents(delta);
       // In Game Over, we only update visual systems
       const head = this.snake.getHead();
       this.cameraController.update(delta, head, this.snake.direction, 0);
@@ -1069,6 +1114,7 @@ export class Game {
     }
 
     if (this.isPaused) {
+      this.advanceLiveOpponents(delta);
       const head = this.snake.getHead();
       this.cameraController.update(delta, head, this.snake.direction, 0);
       return;
@@ -1102,11 +1148,7 @@ export class Game {
     }
 
     // Logic Update
-    if (this.liveWorld)
-      for (const opponent of this.liveOpponents)
-        advanceLiveOpponent(opponent, delta, (direction, up) =>
-          this.orientationQuaternion(direction, up),
-        );
+    this.advanceLiveOpponents(delta);
     if (this.liveWorld) this.checkLivePhantomCollisions();
     const preStepHead = this.snake.getHead().clone();
     if (this.snake.update(delta)) {
