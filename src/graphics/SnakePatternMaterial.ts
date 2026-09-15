@@ -26,6 +26,7 @@ const fragmentShader = `
   varying vec3 ornamentColor;
   varying float patternBits;
   uniform float opacity;
+  uniform sampler2D gradientMap;
   void main() {
     vec2 cell = floor(patternUv * 7.0);
     vec2 mirrored = min(cell, vec2(6.0) - cell);
@@ -35,18 +36,27 @@ const fragmentShader = `
     // errors around exact powers of two otherwise turn solid cells into lines.
     float stablePatternBits = floor(patternBits + 0.5);
     float ornament = mod(floor(stablePatternBits / exp2(bitIndex)), 2.0);
-    gl_FragColor = vec4(mix(backgroundColor, ornamentColor, ornament), opacity);
+    vec3 patternColor = mix(backgroundColor, ornamentColor, ornament);
+    vec3 gradient = texture2D(gradientMap, patternUv).rgb;
+    gl_FragColor = vec4(patternColor * gradient, opacity);
   }
 `;
 
-export function createSnakePatternMesh(capacity: number, opacity = 1): THREE.InstancedMesh {
+export function createSnakePatternMesh(
+  capacity: number,
+  gradientMap: THREE.Texture,
+  opacity = 1,
+): THREE.InstancedMesh {
   const geometry = new THREE.BoxGeometry(0.9, 0.9, 0.9);
   geometry.setAttribute('instancePatternColor', new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3));
   geometry.setAttribute('instancePatternBits', new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1));
   const material = new THREE.ShaderMaterial({
     vertexShader,
     fragmentShader,
-    uniforms: { opacity: { value: opacity } },
+    uniforms: {
+      opacity: { value: opacity },
+      gradientMap: { value: gradientMap },
+    },
     transparent: opacity < 1,
   });
   return new THREE.InstancedMesh(geometry, material, capacity);

@@ -278,7 +278,7 @@ export class Game {
     texture.colorSpace = THREE.SRGBColorSpace;
 
     // Setup InstancedMesh
-    this.snakeMesh = createSnakePatternMesh(10000);
+    this.snakeMesh = createSnakePatternMesh(10000, texture);
     this.snakeMesh.count = 0; // Starts empty
     this.snakeMesh.castShadow = true;
     this.snakeMesh.receiveShadow = true;
@@ -307,7 +307,7 @@ export class Game {
     this.pathfinder = new Pathfinder(this.sceneManager.scene, this.world);
 
     // Phantom Mesh (ghostly appearance)
-    this.phantomMesh = createSnakePatternMesh(10000, 0.5);
+    this.phantomMesh = createSnakePatternMesh(10000, texture, 0.5);
     this.phantomMesh.count = 0;
     this.phantomMesh.frustumCulled = false;
     this.sceneManager.scene.add(this.phantomMesh);
