@@ -1,8 +1,9 @@
 import type { RoomData, RoomSummary } from '../types/replay';
 import { isRealtimeServerMessage, type DeathInput, type DirectionInput, type RealtimeClientMessage, type StateInput } from '../../shared/realtime';
+import type { SnakeAppearance } from '../../shared/appearance';
 export type RoomAction = 'initial' | 'resume' | 'restart' | 'next' | 'join' | 'spectate';
 
-export interface UserData { id?: string; username: string; createdAt: string; lastSeen: string; highScore: number; highScoreSeed?: number; highScoreReplayId?: string; highScoreDate?: string; gamesPlayed: number; totalScore: number; elo: number; settings: { musicVolume: number; sfxVolume: number } }
+export interface UserData { id?: string; username: string; createdAt: string; lastSeen: string; highScore: number; highScoreSeed?: number; highScoreReplayId?: string; highScoreDate?: string; gamesPlayed: number; totalScore: number; elo: number; settings: { musicVolume: number; sfxVolume: number; snakeAppearance?: SnakeAppearance } }
 export interface AuthResult { user: UserData; isNew: boolean }
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'authenticated' | 'offline';
 type EventCallback = (...args: any[]) => void;
@@ -36,6 +37,7 @@ export class NetworkManager {
   sendDirection(action: DirectionInput) { this.sendRealtime({v:2,type:'player.directionChanged',payload:{action}}); }
   sendPlayerState(action: StateInput) { this.sendRealtime({v:2,type:'player.state',payload:{action}}); }
   sendPlayerDeath(action: DeathInput) { this.sendRealtime({v:2,type:'player.died',payload:{action}}); }
+  sendAppearance(appearance: SnakeAppearance) { this.sendRealtime({v:2,type:'player.appearance',payload:{appearance}}); }
   requestResync() { this.sendRealtime({v:2,type:'room.resync'}); }
   private scheduleReconnect(){if(this.roomSeed===null||(typeof navigator!=='undefined'&&!navigator.onLine)||this.retries>=5)return;const delay=Math.min(1000*2**this.retries++,10000);window.setTimeout(()=>this.roomSeed!==null&&this.openRoomSocket(this.roomSeed,this.roomIsSpectator,this.roomIsRestarting),delay);}
   private reconnectRoom(){if(this.roomSeed!==null)this.openRoomSocket(this.roomSeed,this.roomIsSpectator,this.roomIsRestarting);}

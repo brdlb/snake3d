@@ -5,6 +5,8 @@
  * а не тики. Это делает воспроизведение независимым от тик-рейта.
  */
 
+import type { SnakeAppearance } from '../../shared/appearance';
+
 // 3D вектор для хранения (сериализуемый)
 export interface Vec3 {
     x: number;
@@ -36,6 +38,7 @@ export interface ReplayData {
     startParams: StartParams;
     finalScore: number;
     elo?: number;                  // ELO игрока на момент записи
+    appearance?: SnakeAppearance;
     deathPosition: Vec3;           // Позиция смерти
     trajectoryLog: TrajectoryChange[];  // Лог изменений траектории
 }

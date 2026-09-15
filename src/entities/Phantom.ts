@@ -13,12 +13,14 @@ import * as THREE from 'three';
 import { ReplayPlayer, fromVec3 } from '../core/ReplaySystem';
 import type { ReplayData } from '../types/replay';
 import { getSpawnPoint, SPAWN_POINTS } from './SpawnPoints';
+import { normalizeSnakeAppearance, type SnakeAppearance } from '../../shared/appearance';
 
 export class Phantom {
     public segments: THREE.Vector3[] = [];
     public direction: THREE.Quaternion = new THREE.Quaternion();
     public readonly replayPlayer: ReplayPlayer;
     public readonly phantomColor: THREE.Color;
+    public readonly appearance: SnakeAppearance;
 
     private moveInterval: number = 0.20;
     private accumulatedTime: number = 0;
@@ -49,6 +51,11 @@ export class Phantom {
             0x88ff88, // Green ghost
         ];
         this.phantomColor = new THREE.Color(phantomColors[colorIndex % phantomColors.length]);
+        this.appearance = normalizeSnakeAppearance(replayData.appearance ?? {
+            patternSeed: 9000 + colorIndex,
+            backgroundColor: '#16333a',
+            patternColor: '#' + this.phantomColor.getHexString(),
+        });
 
         // Используем начальную скорость из реплея
         this.currentSPM = this.replayPlayer.getInitialSpeed();

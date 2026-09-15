@@ -46,6 +46,8 @@ interface Pulse {
 
 import { Pathfinder } from './Pathfinder';
 import { OfflineDataManager } from '../utils/OfflineDataManager';
+import { normalizeSnakeAppearance, type SnakeAppearance } from '../../shared/appearance';
+import { createSnakePatternMesh, markSnakePatternsUpdated, setSnakePatternAt } from '../graphics/SnakePatternMaterial';
 
 export class Game {
   private settingsManager: SettingsManager;
@@ -100,6 +102,7 @@ export class Game {
     alive: boolean;
     phantom: boolean;
     color: string;
+    appearance: SnakeAppearance;
     segments: THREE.Vector3[];
     direction: THREE.Quaternion;
     directionVector: THREE.Vector3;
@@ -149,6 +152,8 @@ export class Game {
   private localStateSeq = 0;
   private localSnakeInitialized = false;
   private wasBoosting = false;
+  private appearance: SnakeAppearance;
+  private appearanceSaveTimer: number | null = null;
 
   private logAction(action: string, data: unknown): void {
     console.log(`[ActionLog] ${action}`, data);
@@ -158,7 +163,23 @@ export class Game {
     return { x: position.x, y: position.y, z: position.z };
   }
 
+  private changeAppearance(appearance: SnakeAppearance) {
+    this.appearance = normalizeSnakeAppearance(appearance);
+    localStorage.setItem('snake3d_appearance', JSON.stringify(this.appearance));
+    if (this.appearanceSaveTimer !== null) window.clearTimeout(this.appearanceSaveTimer);
+    this.appearanceSaveTimer = window.setTimeout(() => {
+      this.appearanceSaveTimer = null;
+      this.networkManager.sendAppearance(this.appearance);
+      const user = this.networkManager.getUser();
+      if (user) void this.networkManager.updateUser({ settings: { ...user.settings, snakeAppearance: this.appearance } })
+        .catch((error) => console.warn('[Game] Could not save snake appearance', error));
+    }, 150);
+  }
+
   constructor() {
+    let savedAppearance: unknown;
+    try { savedAppearance = JSON.parse(localStorage.getItem('snake3d_appearance') ?? 'null'); } catch { savedAppearance = null; }
+    this.appearance = normalizeSnakeAppearance(savedAppearance);
     // Initialize Player Name (Persistent)
     this.playerName =
       localStorage.getItem('snake3d_player_name') || `Player${Math.floor(Math.random() * 10000)}`;
@@ -220,6 +241,8 @@ export class Game {
       },
       () => this.leaderboardUI.show(),
       (locked) => void this.setOrientationLock(locked),
+      this.appearance,
+      (appearance) => this.changeAppearance(appearance),
     );
 
     // Add Pause Button to HUD
@@ -253,14 +276,8 @@ export class Game {
     );
     texture.colorSpace = THREE.SRGBColorSpace;
 
-    const instanceMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      map: texture,
-    });
-
     // Setup InstancedMesh
-    const boxGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
-    this.snakeMesh = new THREE.InstancedMesh(boxGeo, instanceMaterial, 10000);
+    this.snakeMesh = createSnakePatternMesh(10000);
     this.snakeMesh.count = 0; // Starts empty
     this.snakeMesh.castShadow = true;
     this.snakeMesh.receiveShadow = true;
@@ -289,14 +306,7 @@ export class Game {
     this.pathfinder = new Pathfinder(this.sceneManager.scene, this.world);
 
     // Phantom Mesh (ghostly appearance)
-    const phantomMaterial = new THREE.MeshBasicMaterial({
-      color: 0x88ffff,
-      map: texture,
-      transparent: true,
-      opacity: 0.5,
-    });
-    const phantomGeo = new THREE.BoxGeometry(0.85, 0.85, 0.85);
-    this.phantomMesh = new THREE.InstancedMesh(phantomGeo, phantomMaterial, 10000);
+    this.phantomMesh = createSnakePatternMesh(10000, 0.5);
     this.phantomMesh.count = 0;
     this.phantomMesh.frustumCulled = false;
     this.sceneManager.scene.add(this.phantomMesh);
@@ -329,6 +339,11 @@ export class Game {
       // but we are in constructor, LeaderboardUI is init at line 140.
       // We are at line ~250. So it is strictly safe.
       this.leaderboardUI.setPlayerName(this.playerName);
+      if (currentUser.settings.snakeAppearance) {
+        this.appearance = normalizeSnakeAppearance(currentUser.settings.snakeAppearance);
+        localStorage.setItem('snake3d_appearance', JSON.stringify(this.appearance));
+        this.pauseUI.setAppearance(this.appearance);
+      }
     }
 
     // Listen for authentication to sync player name (reconnects)
@@ -338,6 +353,11 @@ export class Game {
         this.playerName = result.user.username;
         localStorage.setItem('snake3d_player_name', this.playerName);
         this.leaderboardUI.setPlayerName(this.playerName);
+      }
+      if (result.user?.settings?.snakeAppearance) {
+        this.appearance = normalizeSnakeAppearance(result.user.settings.snakeAppearance);
+        localStorage.setItem('snake3d_appearance', JSON.stringify(this.appearance));
+        this.pauseUI.setAppearance(this.appearance);
       }
     });
     this.networkManager.on('roomSocketConnected', () => {
@@ -364,6 +384,10 @@ export class Game {
     );
     this.networkManager.on('food.changed', (change: any) => this.applyLiveFood(change));
     this.networkManager.on('player.died', (death: PlayerDied) => this.applyLiveDeath(death));
+    this.networkManager.on('player.appearance', (change: any) => {
+      const opponent = this.liveOpponents.find((candidate) => candidate.id === change?.entityId);
+      if (opponent && change?.appearance) opponent.appearance = normalizeSnakeAppearance(change.appearance);
+    });
 
     // Visibility Handler to stop loop when tab is hidden
     this._visibilityHandler = () => {
@@ -703,6 +727,7 @@ export class Game {
       alive: player.alive !== false && !this.deadLivePhantoms.has(player.entityId ?? player.id),
       phantom: player.phantom === true,
       color: player.color ?? '#ffffff',
+      appearance: normalizeSnakeAppearance(player.appearance),
       segments,
       direction,
       directionVector,
@@ -1584,6 +1609,7 @@ export class Game {
           deathPosition,
           this.playerName,
         );
+        replayData.appearance = this.appearance;
         // Оффлайн режим — сохраняем результат локально
         await this.saveOfflineGameResult(replayData);
       }
@@ -1752,11 +1778,12 @@ export class Game {
 
       this.dummy.updateMatrix();
       this.snakeMesh.setMatrixAt(i, this.dummy.matrix);
-      this.snakeMesh.setColorAt(i, this._color);
+      const localAppearance = { ...this.appearance, backgroundColor: '#' + this._color.clone().multiply(new THREE.Color(this.appearance.backgroundColor)).getHexString() };
+      setSnakePatternAt(this.snakeMesh, i, localAppearance);
     }
 
     this.snakeMesh.instanceMatrix.needsUpdate = true;
-    if (this.snakeMesh.instanceColor) this.snakeMesh.instanceColor.needsUpdate = true;
+    markSnakePatternsUpdated(this.snakeMesh);
 
     // Render Phantoms
     if (this.phantomMesh) {
@@ -1780,7 +1807,7 @@ export class Game {
           this.dummy.updateMatrix();
 
           this.phantomMesh.setMatrixAt(phantomInstanceIndex, this.dummy.matrix);
-          this.phantomMesh.setColorAt(phantomInstanceIndex, phantom.phantomColor);
+          setSnakePatternAt(this.phantomMesh, phantomInstanceIndex, phantom.appearance);
           phantomInstanceIndex++;
         }
       }
@@ -1792,14 +1819,14 @@ export class Game {
           this.dummy.scale.set(1, 1, 1);
           this.dummy.updateMatrix();
           this.phantomMesh.setMatrixAt(phantomInstanceIndex, this.dummy.matrix);
-          this.phantomMesh.setColorAt(phantomInstanceIndex, new THREE.Color(opponent.color));
+          setSnakePatternAt(this.phantomMesh, phantomInstanceIndex, opponent.appearance);
           phantomInstanceIndex++;
         }
       }
 
       this.phantomMesh.count = phantomInstanceIndex;
       this.phantomMesh.instanceMatrix.needsUpdate = true;
-      if (this.phantomMesh.instanceColor) this.phantomMesh.instanceColor.needsUpdate = true;
+      markSnakePatternsUpdated(this.phantomMesh);
     }
 
     this.postProcess.render();

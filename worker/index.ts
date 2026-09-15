@@ -10,6 +10,7 @@ import {
   type SimPlayer,
   type SimulationState,
 } from '../shared/simulation';
+import { DEFAULT_SNAKE_APPEARANCE, isSnakeAppearance, normalizeSnakeAppearance, type SnakeAppearance } from '../shared/appearance';
 import type {
   DeathInput,
   DirectionInput,
@@ -33,7 +34,7 @@ type User = {
   gamesPlayed: number;
   totalScore: number;
   elo: number;
-  settings: { musicVolume: number; sfxVolume: number };
+  settings: { musicVolume: number; sfxVolume: number; snakeAppearance?: SnakeAppearance };
 };
 type RoomAction = 'initial' | 'resume' | 'restart' | 'next' | 'join' | 'spectate';
 type RoomData = {
@@ -311,7 +312,7 @@ export default {
         gamesPlayed: 0,
         totalScore: 0,
         elo: 1000,
-        settings: { musicVolume: 0.5, sfxVolume: 0.7 },
+        settings: { musicVolume: 0.5, sfxVolume: 0.7, snakeAppearance: DEFAULT_SNAKE_APPEARANCE },
       };
       await env.DB.batch([
         env.DB.prepare(
@@ -342,6 +343,8 @@ export default {
       if (
         ![next.musicVolume, next.sfxVolume].every((v) => typeof v === 'number' && v >= 0 && v <= 1)
       )
+        return fail('INVALID_SETTINGS', 400, requestId);
+      if (next.snakeAppearance !== undefined && !isSnakeAppearance(next.snakeAppearance))
         return fail('INVALID_SETTINGS', 400, requestId);
       await env.DB.prepare('UPDATE users SET settings_json=?,last_seen=? WHERE id=?')
         .bind(JSON.stringify(next), now(), user.id)
@@ -596,6 +599,7 @@ export class RoomDurableObject {
           phantom: true,
           score: Number(replay.finalScore ?? 0),
           color: '#7dd3fc',
+          appearance: replay.appearance,
           startPosition: replay.startParams?.startPosition,
           direction: replay.startParams?.startDirection,
         });
@@ -765,6 +769,7 @@ export class RoomDurableObject {
     const player = addPlayer(state, user.id, user.username, Date.now(), {
       spawnIndex: availableSpawn.spawnIndex,
       entityId: crypto.randomUUID(),
+      appearance: normalizeSnakeAppearance(user.settings?.snakeAppearance),
     });
     const actualSpawn = player.spawnIndex ?? availableSpawn.spawnIndex;
     this.startTrajectory(state, player, actualSpawn);
@@ -874,6 +879,7 @@ export class RoomDurableObject {
         trajectoryLog: terminal.trajectory.changes,
         timestamp: Date.now(),
         elo: user.elo,
+        appearance: terminal.player.appearance,
         terminalReason: terminal.reason,
       };
     const worst = await this.env.DB.prepare(
@@ -970,6 +976,7 @@ export class RoomDurableObject {
         trajectoryLog: terminal.trajectory.changes,
         timestamp: Date.now(),
         elo: user.elo,
+        appearance: terminal.player.appearance,
         terminalReason: terminal.reason,
       };
     const worst = await this.env.DB.prepare(
@@ -1051,11 +1058,13 @@ export class RoomDurableObject {
         player = addPlayer(state, user.id, user.username, Date.now(), {
           spawnIndex,
           instanceId: connectionId,
+          appearance: normalizeSnakeAppearance(user.settings?.snakeAppearance),
         });
         this.startTrajectory(state, player, spawnIndex);
         playerJoined = true;
       } else {
         player.instanceId = connectionId;
+        player.appearance = normalizeSnakeAppearance(user.settings?.snakeAppearance ?? player.appearance);
         player.disconnectedAt = undefined;
         for (const socket of this.ctx.getWebSockets())
           try {
@@ -1118,8 +1127,7 @@ export class RoomDurableObject {
         return;
       }
       if (attachment.spectator) throw new Error();
-      const player = attachment.entityId ? state.players[attachment.entityId] : undefined,
-        action = 'payload' in event ? event.payload.action : undefined;
+      const player = attachment.entityId ? state.players[attachment.entityId] : undefined;
       if (!player || player.instanceId !== attachment.instanceId) {
         ws.send(JSON.stringify({ v: 2, type: 'error', payload: { code: 'STALE_CONNECTION' } }));
         return;
@@ -1128,6 +1136,21 @@ export class RoomDurableObject {
         ws.send(JSON.stringify({ v: 2, type: 'error', payload: { code: 'PLAYER_NOT_ALIVE' } }));
         return;
       }
+      if (event.type === 'player.appearance') {
+        if (!isSnakeAppearance(event.payload.appearance)) {
+          ws.send(JSON.stringify({ v: 2, type: 'error', payload: { code: 'INVALID_MESSAGE' } }));
+          return;
+        }
+        player.appearance = normalizeSnakeAppearance(event.payload.appearance);
+        await this.persist(state);
+        this.broadcast({
+          v: 2,
+          type: 'player.appearance',
+          payload: { entityId: player.entityId, appearance: player.appearance },
+        });
+        return;
+      }
+      const action = 'payload' in event && 'action' in event.payload ? event.payload.action : undefined;
       if (event.type === 'player.state' && stateInput(action)) {
         if (action.seq <= (player.lastStateSeq ?? -1)) return;
         player.segments = action.segments;

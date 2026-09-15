@@ -39,17 +39,27 @@ export class PauseUI {
     private onSettings: () => void;
     private onLeaderboard: () => void;
     private onOrientationLockChange?: (locked: boolean) => void;
+    private appearance: SnakeAppearance;
+    private onAppearanceChange: (appearance: SnakeAppearance) => void;
+    private patternCanvas!: HTMLCanvasElement;
+    private seedInput!: HTMLInputElement;
+    private backgroundInput!: HTMLInputElement;
+    private patternInput!: HTMLInputElement;
 
     constructor(
         onResume: () => void,
         onSettings: () => void,
         onLeaderboard: () => void,
         onOrientationLockChange?: (locked: boolean) => void,
+        appearance: SnakeAppearance = { patternSeed: 1847, backgroundColor: '#18212f', patternColor: '#4ade80' },
+        onAppearanceChange: (appearance: SnakeAppearance) => void = () => {},
     ) {
         this.onResume = onResume;
         this.onSettings = onSettings;
         this.onLeaderboard = onLeaderboard;
         this.onOrientationLockChange = onOrientationLockChange;
+        this.appearance = { ...appearance };
+        this.onAppearanceChange = onAppearanceChange;
         this.createUI();
     }
 
@@ -120,6 +130,46 @@ export class PauseUI {
         this.container.appendChild(titlePanel);
         this.container.appendChild(statsPanel);
         this.container.appendChild(this.settingsBtn);
+
+        const appearancePanel = document.createElement('section');
+        appearancePanel.className = 'pause-panel appearance-panel';
+        const appearanceTitle = document.createElement('span');
+        appearanceTitle.className = 'appearance-title';
+        appearanceTitle.textContent = 'SNAKE STYLE';
+        this.patternCanvas = document.createElement('canvas');
+        this.patternCanvas.width = 112;
+        this.patternCanvas.height = 112;
+        this.patternCanvas.className = 'pattern-preview';
+        this.patternCanvas.setAttribute('aria-label', 'Snake ornament preview');
+        const controls = document.createElement('div');
+        controls.className = 'appearance-controls';
+        const seedRow = document.createElement('label');
+        seedRow.className = 'appearance-seed';
+        const seedLabel = document.createElement('span');
+        seedLabel.textContent = 'SEED';
+        this.seedInput = document.createElement('input');
+        this.seedInput.type = 'number';
+        this.seedInput.min = '0';
+        this.seedInput.max = '4294967295';
+        this.seedInput.value = String(this.appearance.patternSeed);
+        const randomButton = document.createElement('button');
+        randomButton.type = 'button';
+        randomButton.textContent = 'RANDOM';
+        randomButton.onclick = () => {
+            this.seedInput.value = String(crypto.getRandomValues(new Uint32Array(1))[0]);
+            this.commitAppearance();
+        };
+        seedRow.append(seedLabel, this.seedInput, randomButton);
+        const colors = document.createElement('div');
+        colors.className = 'appearance-colors';
+        this.backgroundInput = this.createColorInput('BACKGROUND', this.appearance.backgroundColor);
+        this.patternInput = this.createColorInput('ORNAMENT', this.appearance.patternColor);
+        colors.append(this.backgroundInput.parentElement!, this.patternInput.parentElement!);
+        controls.append(seedRow, colors);
+        appearancePanel.append(appearanceTitle, this.patternCanvas, controls);
+        this.container.appendChild(appearancePanel);
+        this.seedInput.onchange = () => this.commitAppearance();
+        this.drawPattern();
 
         if (this.isMobileDevice()) {
             const orientationPanel = document.createElement('label');
@@ -202,6 +252,9 @@ export class PauseUI {
                 align-items: flex-start;
                 justify-content: center;
                 gap: 20px;
+                overflow-y: auto;
+                box-sizing: border-box;
+                padding: 18px 0;
             }
 
             .pause-screen.active {
@@ -333,6 +386,25 @@ export class PauseUI {
                 color: #ffd700;
             }
 
+            .appearance-panel {
+                gap: 20px;
+                padding: 18px 60px;
+                border-right-color: #f472b6;
+                transition-delay: 0.23s;
+                font-family: 'Jura', sans-serif;
+            }
+            .appearance-title { font-weight: 800; letter-spacing: 2px; writing-mode: vertical-rl; transform: rotate(180deg); }
+            .pattern-preview { width: 92px; height: 92px; image-rendering: pixelated; border: 2px solid #444; background: #111; }
+            .appearance-controls { display: flex; flex-direction: column; gap: 12px; }
+            .appearance-seed, .appearance-colors label { display: flex; align-items: center; gap: 9px; color: #888; font-size: .78rem; font-weight: 700; letter-spacing: 1px; }
+            .appearance-seed input { width: 112px; }
+            .appearance-seed input, .appearance-seed button { color: #fff; background: #111; border: 1px solid #555; padding: 7px; font-family: inherit; }
+            .appearance-seed button { cursor: pointer; }
+            .appearance-seed button:hover { border-color: #f472b6; color: #f472b6; }
+            .appearance-colors { display: flex; gap: 18px; }
+            .appearance-colors label { flex-direction: column; align-items: flex-start; }
+            .appearance-colors input { width: 52px; height: 28px; padding: 0; border: 1px solid #555; background: #111; cursor: pointer; }
+
             .resume-btn {
                 transition-delay: 0.3s;
                 border-right-color: #4ade80; /* Green */
@@ -388,6 +460,18 @@ export class PauseUI {
                     padding: 15px 30px;
                     font-size: 0.85rem;
                 }
+                .appearance-panel { padding: 12px 30px; gap: 10px; }
+                .appearance-title { display: none; }
+                .pattern-preview { width: 70px; height: 70px; }
+                .appearance-colors { gap: 8px; }
+            }
+            @media (max-height: 850px) {
+                .pause-screen { justify-content: flex-start; gap: 10px; }
+                .title-panel { padding-top: 12px; padding-bottom: 12px; }
+                .pause-title { font-size: 3rem; }
+                .stats-panel { padding-top: 12px; padding-bottom: 12px; }
+                .menu-btn { padding-top: 18px; padding-bottom: 18px; }
+                .pattern-preview { width: 70px; height: 70px; }
             }
         `;
         document.head.appendChild(style);
@@ -403,6 +487,49 @@ export class PauseUI {
         this.foodGreenEl.textContent = stats.foodCount.green.toString();
         this.foodBlueEl.textContent = stats.foodCount.blue.toString();
         this.foodPinkEl.textContent = stats.foodCount.pink.toString();
+    }
+
+    private createColorInput(labelText: string, value: string): HTMLInputElement {
+        const label = document.createElement('label');
+        const text = document.createElement('span');
+        text.textContent = labelText;
+        const input = document.createElement('input');
+        input.type = 'color';
+        input.value = value;
+        input.oninput = () => this.commitAppearance();
+        label.append(text, input);
+        return input;
+    }
+
+    private commitAppearance() {
+        const parsedSeed = Number(this.seedInput.value);
+        this.appearance = {
+            patternSeed: Number.isInteger(parsedSeed) && parsedSeed >= 0 ? parsedSeed >>> 0 : 0,
+            backgroundColor: this.backgroundInput.value,
+            patternColor: this.patternInput.value,
+        };
+        this.seedInput.value = String(this.appearance.patternSeed);
+        this.drawPattern();
+        this.onAppearanceChange({ ...this.appearance });
+    }
+
+    private drawPattern() {
+        const context = this.patternCanvas.getContext('2d');
+        if (!context) return;
+        const pattern = generateSnakePattern(this.appearance.patternSeed);
+        const cell = this.patternCanvas.width / pattern.length;
+        pattern.forEach((row, y) => row.forEach((filled, x) => {
+            context.fillStyle = filled ? this.appearance.patternColor : this.appearance.backgroundColor;
+            context.fillRect(x * cell, y * cell, cell + 0.5, cell + 0.5);
+        }));
+    }
+
+    public setAppearance(appearance: SnakeAppearance) {
+        this.appearance = { ...appearance };
+        this.seedInput.value = String(appearance.patternSeed);
+        this.backgroundInput.value = appearance.backgroundColor;
+        this.patternInput.value = appearance.patternColor;
+        this.drawPattern();
     }
 
     public updateRoom(seed: number) {
@@ -459,3 +586,4 @@ export class PauseUI {
         this.container.remove();
     }
 }
+import { generateSnakePattern, type SnakeAppearance } from '../../shared/appearance';

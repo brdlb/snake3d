@@ -1,3 +1,5 @@
+import { DEFAULT_SNAKE_APPEARANCE, normalizeSnakeAppearance, type SnakeAppearance } from './appearance';
+
 /** Deterministic, renderer-free rules used by both the browser and the Room DO. */
 export type Axis = { x: number; y: number; z: number };
 export type FoodKind = 'green' | 'blue' | 'pink';
@@ -15,6 +17,7 @@ export type SimPlayer = {
   alive: boolean;
   phantom?: boolean;
   color: string;
+  appearance?: SnakeAppearance;
   nextStepAt: number;
   instanceId?: string;
   disconnectedAt?: number;
@@ -146,7 +149,7 @@ export function addPlayer(
   options: Partial<
     Pick<
       SimPlayer,
-      'entityId' | 'phantom' | 'score' | 'color' | 'segments' | 'direction' | 'up' | 'instanceId'
+      'entityId' | 'phantom' | 'score' | 'color' | 'appearance' | 'segments' | 'direction' | 'up' | 'instanceId'
     >
   > & { spawnIndex?: number; startPosition?: Axis } = {},
 ) {
@@ -172,6 +175,11 @@ export function addPlayer(
     alive: true,
     phantom: options.phantom,
     color: options.color ?? (options.phantom ? '#7dd3fc' : '#ffffff'),
+    appearance: normalizeSnakeAppearance(options.appearance ?? (options.phantom ? {
+      ...DEFAULT_SNAKE_APPEARANCE,
+      backgroundColor: '#16333a',
+      patternColor: '#7dd3fc',
+    } : undefined)),
     nextStepAt: now + 200,
     instanceId: options.instanceId,
     spawnIndex: spawn.spawnIndex,
