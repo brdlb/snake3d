@@ -78,6 +78,10 @@ export class SceneManager {
         this.scene.add(this.wallMesh);
     }
 
+    public setWallsVisible(visible: boolean): void {
+        if (this.wallMesh) this.wallMesh.visible = visible;
+    }
+
     public onWindowResize() {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();

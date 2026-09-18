@@ -539,6 +539,7 @@ export class Game {
     }
 
     this.sceneManager.setupWalls(this.world.size);
+    if (this.tutorialMode) this.sceneManager.setWallsVisible(false);
     this.particleSystem = new ParticleSystem(this.sceneManager.scene, texture);
     this.pathfinder = new Pathfinder(this.sceneManager.scene, this.world);
 
@@ -761,6 +762,7 @@ export class Game {
     this.tutorial.completeExpansion();
     this.tutorialBlocked = false;
     this.tutorialUI?.hide();
+    this.sceneManager.setWallsVisible(true);
     if (this.tutorialPlane) this.tutorialPlane.visible = false;
     this.world.respawnFood(this.snake.segments);
     this.hud.togglePauseButton(true);

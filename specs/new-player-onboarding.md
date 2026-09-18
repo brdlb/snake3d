@@ -59,13 +59,15 @@ Requirements:
 5. [x] Defer playfield construction until tutorial confirmation, while preserving automatic construction for completed onboarding.
 6. [x] Run focused and repository validation, including `npm run cf:test`, `npm run build`, `npm run lint`, and `git diff --check`.
 7. [ ] Manual desktop/mobile browser smoke; deployment remains deferred.
+8. [x] Keep the tutorial boundary cube hidden until the roll gate is accepted.
 
 ## Open questions
 
-- Non-blocking: the existing scene already renders a full boundary cube; visual layer-by-layer animation can be represented by a local transition without changing the server world geometry.
+- None.
 
 ## Decision log
 
 - 2026-09-19: Keep tutorial state in a pure client module and leave realtime, Worker, D1, replay submission and room contracts unchanged.
 - 2026-09-19: Use localStorage marker `snake3d_onboarding_completed`; failed tutorial runs remain replayable.
 - 2026-09-19: A tutorial `Game` instance may create scene/UI infrastructure, but no playfield state or field renderables before the player confirms tutorial start. Returning players construct the playfield before the room flow begins.
+- 2026-09-19: The tutorial boundary cube remains hidden through the growth, turn, acceleration, and slowdown phases and becomes visible only after the roll gate completes.
