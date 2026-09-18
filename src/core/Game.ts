@@ -50,6 +50,8 @@ import { Pathfinder } from './Pathfinder';
 import { OfflineDataManager } from '../utils/OfflineDataManager';
 import { normalizeSnakeAppearance, type SnakeAppearance } from '../../shared/appearance';
 import { createSnakePatternMesh, markSnakePatternsUpdated, setSnakePatternAt } from '../graphics/SnakePatternMaterial';
+import { TutorialSession, type TutorialCollectibleEffect } from '../tutorial/TutorialSession';
+import { TutorialUI } from '../ui/TutorialUI';
 
 export class Game {
   private settingsManager: SettingsManager;
@@ -60,7 +62,7 @@ export class Game {
   private gameOverUI: GameOverUI;
   private pauseUI: PauseUI;
   private hud: GameHUD;
-  private welcomeScreen: WelcomeScreen;
+  private welcomeScreen: WelcomeScreen | null = null;
   private leaderboardUI: LeaderboardUI;
   private soundManager: SoundManager;
   private pathfinder: Pathfinder;
@@ -161,6 +163,11 @@ export class Game {
   private wasBoosting = false;
   private appearance: SnakeAppearance;
   private appearanceSaveTimer: number | null = null;
+  private readonly tutorialMode: boolean;
+  private tutorial: TutorialSession | null = null;
+  private tutorialUI: TutorialUI | null = null;
+  private tutorialBlocked = false;
+  private tutorialConnectionStarted = false;
 
   private logAction(action: string, data: unknown): void {
     console.log(`[ActionLog] ${action}`, data);
@@ -183,7 +190,8 @@ export class Game {
     }, 150);
   }
 
-  constructor() {
+  constructor(options: { tutorial?: boolean } = {}) {
+    this.tutorialMode = options.tutorial === true;
     let savedAppearance: unknown;
     try { savedAppearance = JSON.parse(localStorage.getItem('snake3d_appearance') ?? 'null'); } catch { savedAppearance = null; }
     this.appearance = normalizeSnakeAppearance(savedAppearance);
@@ -439,10 +447,17 @@ export class Game {
     this.loop.add(this.render.bind(this));
     this.loop.start();
 
-    // Welcome Screen - показываем приветственный экран
-    this.welcomeScreen = new WelcomeScreen((mode, roomSeed) => this.handleGameStart(mode, roomSeed));
-    if (new URLSearchParams(window.location.search).get('room') === null) {
-      this.initialSpectatorPromise = this.handleGameStart('spectator');
+    if (this.tutorialMode) {
+      this.tutorialUI = new TutorialUI();
+      this.tutorialUI.show('Начните обучение, чтобы освоить рост, ускорение, замедление и roll.', 'Нажмите кнопку — звук включится после вашего действия.', () => {
+        void this.startTutorial();
+      });
+    } else {
+      // Welcome Screen - показываем приветственный экран
+      this.welcomeScreen = new WelcomeScreen((mode, roomSeed) => this.handleGameStart(mode, roomSeed));
+      if (new URLSearchParams(window.location.search).get('room') === null) {
+        this.initialSpectatorPromise = this.handleGameStart('spectator');
+      }
     }
 
     // Initialize Player Name
@@ -480,16 +495,24 @@ export class Game {
     };
 
     this.input.on('left', () => {
+      if (this.tutorialMode && this.handleTutorialTurn('left')) return;
       if (this.isPaused) return this.changePauseSnake(-1);
       handleTurn(() => this.snake.rotate(Math.PI / 2));
     });
     this.input.on('right', () => {
+      if (this.tutorialMode && this.handleTutorialTurn('right')) return;
       if (this.isPaused) return this.changePauseSnake(1);
       handleTurn(() => this.snake.rotate(-Math.PI / 2));
     });
-    this.input.on('rollLeft', () => handleTurn(() => this.snake.roll(-Math.PI / 2)));
-    this.input.on('rollRight', () => handleTurn(() => this.snake.roll(Math.PI / 2)));
-    this.input.on('pause', () => this.togglePause()); // Escape key
+    this.input.on('rollLeft', () => {
+      if (this.tutorialMode && this.handleTutorialRoll('left')) return;
+      handleTurn(() => this.snake.roll(-Math.PI / 2));
+    });
+    this.input.on('rollRight', () => {
+      if (this.tutorialMode && this.handleTutorialRoll('right')) return;
+      handleTurn(() => this.snake.roll(Math.PI / 2));
+    });
+    this.input.on('pause', () => { if (!this.tutorialBlocked) this.togglePause(); }); // Escape key
     this.input.on('spectatorFreeCamera', (isRepeat) => {
       if (!isRepeat && this.isSpectating) this.setSpectatorCameraMode('free');
     });
@@ -657,6 +680,64 @@ export class Game {
     }
 
     console.log('Game started!');
+  }
+
+  private async startTutorial(): Promise<void> {
+    if (!this.tutorialMode || this.tutorial) return;
+    await this.soundManager.initAudio();
+    const spawn = new THREE.Vector3(Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2));
+    const direction = new THREE.Vector3(0, 0, -1);
+    const up = new THREE.Vector3(0, 1, 0);
+    this.tutorial = new TutorialSession(spawn, direction, up);
+    this.snake.reset(spawn, new THREE.Quaternion());
+    this.world.setSeed(1337);
+    this.phantoms = [];
+    this.liveOpponents = [];
+    this.liveWorld = false;
+    this.isSpectating = false;
+    this.isWaitingForStart = false;
+    this.tutorialBlocked = false;
+    this.setTutorialFood(0);
+    this.tutorialUI?.hide();
+    this.cameraController.stopOrbitMode();
+    this.hud.togglePauseButton(false);
+  }
+
+  private setTutorialFood(index: number): void {
+    const item = this.tutorial?.getLayout().collectibles[index];
+    if (!item) {
+      this.world.foodPositions = [];
+      this.world.foodColors = [];
+      this.world.foodSounds = [];
+      return;
+    }
+    const color = item.effect === 'growth' ? FOOD_COLORS.BLUE : item.effect === 'acceleration' ? FOOD_COLORS.GREEN : item.effect === 'slowdown' ? FOOD_COLORS.PINK : FOOD_COLORS.BLUE;
+    this.world.foodPositions = [item.position.clone()];
+    this.world.foodColors = [new THREE.Color(color)];
+    this.world.foodSounds = [2];
+  }
+
+  private handleTutorialTurn(action: 'left' | 'right'): boolean {
+    if (!this.tutorial || this.tutorial.phase !== 'turn_gate') return false;
+    // The target is generated on the right side of the current forward vector.
+    if (action !== this.tutorial.getLayout().requiredTurn) return true;
+    this.snake.rotate(action === 'left' ? Math.PI / 2 : -Math.PI / 2);
+    this.tutorialUI?.hide();
+    this.setTutorialFood(1);
+    return true;
+  }
+
+  private handleTutorialRoll(action: 'left' | 'right'): boolean {
+    if (!this.tutorial || this.tutorial.phase !== 'roll_gate') return false;
+    this.snake.roll(action === 'left' ? -Math.PI / 2 : Math.PI / 2);
+    this.tutorial.acceptRoll();
+    localStorage.setItem('snake3d_onboarding_completed', '1');
+    this.tutorial.completeExpansion();
+    this.tutorialBlocked = false;
+    this.tutorialUI?.hide();
+    this.world.respawnFood(this.snake.segments);
+    this.hud.togglePauseButton(true);
+    return true;
   }
 
   private showSpectatorBanner(): void {
@@ -1225,6 +1306,13 @@ export class Game {
       return;
     }
 
+    if (this.tutorialMode && this.tutorialBlocked) {
+      const head = this.snake.getHead();
+      this.cameraController.update(delta, head, this.snake.direction, 0);
+      this.particleSystem.update(delta);
+      return;
+    }
+
     if (this.isSpectating) {
       this.advanceLiveOpponents(delta);
       if (this.spectatorCameraMode === 'free') {
@@ -1567,6 +1655,47 @@ export class Game {
     if (foodIndex !== -1) {
       const eatenColor = this.world.foodColors[foodIndex] || new THREE.Color(0x0088ff);
 
+      if (this.tutorialMode && this.tutorial) {
+        const currentIndex = this.tutorial.phase === 'extension_intro' ? 0 : this.tutorial.phase === 'turn_gate' ? 1 : this.tutorial.phase === 'acceleration_intro' ? 2 : this.tutorial.phase === 'slowdown_intro' ? 3 : 4;
+        const effect: TutorialCollectibleEffect = this.tutorial.getLayout().collectibles[currentIndex]?.effect ?? 'growth';
+        const phase = this.tutorial.collect(effect);
+        if (effect === 'growth') {
+          for (let i = 0; i < 5; i++) this.snake.grow();
+        } else if (effect === 'acceleration') {
+          this.currentSPM = Math.min(600, this.currentSPM + 50);
+        } else if (effect === 'slowdown') {
+          this.currentSPM = Math.max(60, this.currentSPM - 10);
+        }
+        this.world.foodPositions = [];
+        this.world.foodColors = [];
+        this.world.foodSounds = [];
+        this.tutorialBlocked = true;
+        if (phase === 'turn_gate') {
+          const turnHint = this.tutorial?.getLayout().requiredTurn === 'left'
+            ? 'Desktop: A — влево. Mobile: свайп влево.'
+            : 'Desktop: D — вправо. Mobile: свайп вправо.';
+          this.tutorialUI?.show('Отлично. Синий куб увеличивает змею. Теперь поверните к следующему кубу.', turnHint, null);
+          this.tutorialBlocked = false;
+        } else if (phase === 'acceleration_intro') {
+          this.tutorialUI?.show('Рост освоен. Подтвердите, чтобы познакомиться с ускорением.', 'Нажмите ПРОДОЛЖИТЬ.', () => {
+            this.tutorialBlocked = false;
+            this.tutorial?.confirm();
+            this.tutorialUI?.hide();
+            this.setTutorialFood(2);
+          });
+        } else if (phase === 'slowdown_intro') {
+          this.tutorialUI?.show('Зелёный куб ускоряет движение. Теперь попробуйте замедление.', 'Розовый куб замедляет змею.', () => {
+            this.tutorialBlocked = false;
+            this.tutorial?.confirm();
+            this.tutorialUI?.hide();
+            this.setTutorialFood(3);
+          });
+        } else if (phase === 'roll_gate') {
+          this.tutorialUI?.show('Последний шаг — roll вокруг оси движения.', 'Desktop: Q/E. Mobile: вертикальный свайп.', null);
+        }
+        return;
+      }
+
       // Determine effects based on color
       const hex = eatenColor.getHex();
       let spmChange = 10;
@@ -1774,6 +1903,16 @@ export class Game {
     this.gameOverUI.show();
     this.hud.togglePauseButton(false);
     this.hud.setVisibility(false);
+
+    if (this.tutorialMode && !this.tutorialConnectionStarted) {
+      this.tutorialConnectionStarted = true;
+      try {
+        await this.networkManager.connect();
+        this.welcomeScreen = new WelcomeScreen((mode, roomSeed) => this.handleGameStart(mode, roomSeed));
+      } catch (error) {
+        console.warn('[Tutorial] Could not connect after local game over; staying offline:', error);
+      }
+    }
 
     if (reason && this.liveWorld) {
       // The restart assignment reads replays from D1, so wait until the

@@ -938,6 +938,27 @@ body {
   letter-spacing: 1px;
 }
 
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 11000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .2s ease, visibility .2s ease;
+}
+.tutorial-overlay.active { opacity: 1; visibility: visible; pointer-events: auto; }
+.tutorial-card { width: min(92vw, 520px); padding: 28px; color: #e9f4ff; background: #07090d; border: 1px solid rgba(0, 199, 239, .45); text-align: center; box-shadow: 0 0 40px rgba(0, 199, 239, .12); }
+.tutorial-card h2 { margin: 0 0 16px; color: #00c7ef; font: 700 24px 'Jura', sans-serif; letter-spacing: 4px; }
+.tutorial-card p { margin: 0 auto 14px; font: 18px/1.45 'Jura', sans-serif; }
+.tutorial-hint { min-height: 22px; margin-bottom: 20px; color: #8b98a7; font-size: 13px; }
+.tutorial-card button { padding: 12px 24px; color: #fff; background: rgba(0, 199, 239, .14); border: 1px solid #00c7ef; font: 700 13px 'Jura', sans-serif; letter-spacing: 2px; cursor: pointer; }
+.tutorial-card button:hover { background: rgba(0, 199, 239, .28); }
+
 .welcome-room-invitation {
   margin: 0 0 24px;
   max-width: 360px;

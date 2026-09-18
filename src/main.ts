@@ -17,6 +17,11 @@ if ('serviceWorker' in navigator) {
 
 // Initialize the game when the DOM is ready
 window.addEventListener('DOMContentLoaded', async () => {
+    const onboardingCompleted = localStorage.getItem('snake3d_onboarding_completed') === '1';
+    if (!onboardingCompleted) {
+        new Game({ tutorial: true });
+        return;
+    }
     // Authentication must never keep the game on its loading screen indefinitely.
     const connect = networkManager.connect();
     try {
