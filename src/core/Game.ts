@@ -50,6 +50,7 @@ import { Pathfinder } from './Pathfinder';
 import { OfflineDataManager } from '../utils/OfflineDataManager';
 import { normalizeSnakeAppearance, type SnakeAppearance } from '../../shared/appearance';
 import { createSnakePatternMesh, markSnakePatternsUpdated, setSnakePatternAt } from '../graphics/SnakePatternMaterial';
+import { WallMaterial } from '../graphics/WallMaterial';
 import { TutorialSession, type TutorialCollectibleEffect } from '../tutorial/TutorialSession';
 import { TutorialUI } from '../ui/TutorialUI';
 
@@ -64,24 +65,25 @@ export class Game {
   private hud: GameHUD;
   private welcomeScreen: WelcomeScreen | null = null;
   private leaderboardUI: LeaderboardUI;
-  private soundManager: SoundManager;
-  private pathfinder: Pathfinder;
+  private soundManager!: SoundManager;
+  private pathfinder!: Pathfinder;
   private offlineManager: OfflineDataManager;
 
   private loop: Loop;
   private input: InputManager;
 
-  private snake: Snake;
-  private world: World;
+  private snake!: Snake;
+  private world!: World;
+  private playfieldInitialized = false;
 
   // Visuals
-  private snakeMesh: THREE.InstancedMesh;
-  private foodMesh: THREE.InstancedMesh;
+  private snakeMesh!: THREE.InstancedMesh;
+  private foodMesh!: THREE.InstancedMesh;
   private tutorialPlane: THREE.Mesh | null = null;
-  private particleSystem: ParticleSystem;
+  private particleSystem!: ParticleSystem;
 
   // Shared Materials
-  private foodMaterial: THREE.MeshBasicMaterial;
+  private foodMaterial!: THREE.MeshBasicMaterial;
 
   // Helpers for InstancedMesh
   private dummy: THREE.Object3D;
@@ -272,72 +274,13 @@ export class Game {
     this.loop = new Loop();
     this.input = new InputManager();
 
-    // 4. Initialize Game Entities
-    this.world = new World(WORLD_SIZE);
-
-    // Начальная точка спауна (будет обновлена при initializeRoom)
-    this.playerSpawnIndex = getRandomSpawnIndex();
-    const initialSpawn = getSpawnPoint(this.playerSpawnIndex);
-    this.snake = new Snake(initialSpawn.position.clone(), initialSpawn.direction.clone());
-
-    this.soundManager = new SoundManager(this.sceneManager, this.world, this.settingsManager);
-
-    // 5. Setup Visuals
-    const textureLoader = new THREE.TextureLoader();
-    const texture = textureLoader.load(
-      'sp.png',
-      () => console.log('Texture loaded successfully'),
-      undefined,
-      (err) => console.error('Error loading texture', err),
-    );
-    texture.colorSpace = THREE.SRGBColorSpace;
-
-    // Setup InstancedMesh
-    this.snakeMesh = createSnakePatternMesh(10000, texture);
-    this.snakeMesh.count = 0; // Starts empty
-    this.snakeMesh.castShadow = true;
-    this.snakeMesh.receiveShadow = true;
-    this.snakeMesh.frustumCulled = false;
-    this.sceneManager.scene.add(this.snakeMesh);
-
-    // Helpers
+    // 4. Helpers (the playfield itself is initialized only after onboarding).
     this.dummy = new THREE.Object3D();
     this._color = new THREE.Color();
 
-    // Food
-    this.foodMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, map: texture });
-    const foodGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
-    this.foodMesh = new THREE.InstancedMesh(foodGeo, this.foodMaterial, this.world.FOOD_COUNT);
-    this.foodMesh.count = this.world.FOOD_COUNT;
-    this.foodMesh.castShadow = true;
-    this.sceneManager.scene.add(this.foodMesh);
-    if (this.tutorialMode) {
-      this.world.foodPositions = [];
-      this.world.foodColors = [];
-      this.world.foodSounds = [];
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), this.foodMaterial);
-      plane.rotation.x = -Math.PI / 2;
-      plane.position.set(WORLD_SIZE / 2, WORLD_SIZE / 2 - 0.5, WORLD_SIZE / 2);
-      plane.visible = false;
-      plane.receiveShadow = true;
-      this.tutorialPlane = plane;
-      this.sceneManager.scene.add(plane);
-    }
-
-    // Scene Walls
-    this.sceneManager.setupWalls(this.world.size);
-
-    // Particles
-    this.particleSystem = new ParticleSystem(this.sceneManager.scene, texture);
-
-    // Pathfinder
-    this.pathfinder = new Pathfinder(this.sceneManager.scene, this.world);
-
-    // Phantom Mesh (ghostly appearance)
-    this.phantomMesh = createSnakePatternMesh(10000, texture, 0.5);
-    this.phantomMesh.count = 0;
-    this.phantomMesh.frustumCulled = false;
-    this.sceneManager.scene.add(this.phantomMesh);
+    // A returning player gets the field as part of entry; a new player gets it
+    // from startTutorial(), after explicitly choosing to begin onboarding.
+    if (!this.tutorialMode) this.initializePlayfield();
 
     // Network Manager
     this.networkManager = NetworkManager.getInstance();
@@ -483,7 +426,7 @@ export class Game {
 
   private setupInputs() {
     const handleTurn = (action: () => void) => {
-      if (this.isSpectating) return;
+      if (!this.playfieldInitialized || this.isSpectating) return;
       const prevDir = this.snake.direction.clone();
       action();
       if (!this.snake.direction.equals(prevDir)) {
@@ -540,6 +483,70 @@ export class Game {
       if (!isRepeat && this.isSpectating && this.spectatorCameraMode === 'follow')
         this.changeSpectatorTarget(1);
     });
+  }
+
+  /**
+   * Creates the playable field and its runtime entities after onboarding has
+   * been accepted (or immediately for a returning player).
+   */
+  private initializePlayfield(): void {
+    if (this.playfieldInitialized) return;
+
+    this.world = new World(WORLD_SIZE);
+    this.playerSpawnIndex = getRandomSpawnIndex();
+    const initialSpawn = getSpawnPoint(this.playerSpawnIndex);
+    this.snake = new Snake(initialSpawn.position.clone(), initialSpawn.direction.clone());
+
+    const textureLoader = new THREE.TextureLoader();
+    const texture = textureLoader.load(
+      'sp.png',
+      () => console.log('Texture loaded successfully'),
+      undefined,
+      (err) => console.error('Error loading texture', err),
+    );
+    texture.colorSpace = THREE.SRGBColorSpace;
+
+    this.soundManager = new SoundManager(this.sceneManager, this.world, this.settingsManager);
+
+    this.snakeMesh = createSnakePatternMesh(10000, texture);
+    this.snakeMesh.count = 0;
+    this.snakeMesh.castShadow = true;
+    this.snakeMesh.receiveShadow = true;
+    this.snakeMesh.frustumCulled = false;
+    this.sceneManager.scene.add(this.snakeMesh);
+
+    this.foodMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, map: texture });
+    const foodGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+    this.foodMesh = new THREE.InstancedMesh(foodGeo, this.foodMaterial, this.world.FOOD_COUNT);
+    this.foodMesh.count = this.world.FOOD_COUNT;
+    this.foodMesh.castShadow = true;
+    this.sceneManager.scene.add(this.foodMesh);
+
+    if (this.tutorialMode) {
+      this.world.foodPositions = [];
+      this.world.foodColors = [];
+      this.world.foodSounds = [];
+      const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(WORLD_SIZE + 1, WORLD_SIZE + 1),
+        WallMaterial,
+      );
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.set(WORLD_SIZE / 2, WORLD_SIZE / 2 - 0.5, WORLD_SIZE / 2);
+      plane.visible = false;
+      plane.receiveShadow = true;
+      this.tutorialPlane = plane;
+      this.sceneManager.scene.add(plane);
+    }
+
+    this.sceneManager.setupWalls(this.world.size);
+    this.particleSystem = new ParticleSystem(this.sceneManager.scene, texture);
+    this.pathfinder = new Pathfinder(this.sceneManager.scene, this.world);
+
+    this.phantomMesh = createSnakePatternMesh(10000, texture, 0.5);
+    this.phantomMesh.count = 0;
+    this.phantomMesh.frustumCulled = false;
+    this.sceneManager.scene.add(this.phantomMesh);
+    this.playfieldInitialized = true;
   }
 
   /**
@@ -697,6 +704,7 @@ export class Game {
 
   private async startTutorial(): Promise<void> {
     if (!this.tutorialMode || this.tutorial) return;
+    this.initializePlayfield();
     await this.soundManager.initAudio();
     const spawn = new THREE.Vector3(Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2));
     const direction = new THREE.Vector3(0, 0, -1);
@@ -1202,15 +1210,18 @@ export class Game {
     if (this.welcomeScreen) this.welcomeScreen.dispose();
     this.spectatorBanner?.remove();
 
-    // Dispose Resources
-    this.snakeMesh.geometry.dispose();
-    this.foodMesh.geometry.dispose();
-    this.particleSystem.dispose();
-    this.pathfinder.dispose();
+    // Dispose Resources only when the playfield was constructed. A new player
+    // can close the onboarding screen before choosing to initialize it.
+    if (this.playfieldInitialized) {
+      this.snakeMesh.geometry.dispose();
+      this.foodMesh.geometry.dispose();
+      this.particleSystem.dispose();
+      this.pathfinder.dispose();
 
-    // @ts-ignore
-    if (this.snakeMesh.material.dispose) this.snakeMesh.material.dispose();
-    if (this.foodMaterial.dispose) this.foodMaterial.dispose();
+      // @ts-ignore
+      if (this.snakeMesh.material.dispose) this.snakeMesh.material.dispose();
+      if (this.foodMaterial.dispose) this.foodMaterial.dispose();
+    }
   }
 
   private togglePause() {
@@ -1316,6 +1327,8 @@ export class Game {
   private update(delta: number) {
     this.time += delta;
     if (!this.input.isActionPressed('boost')) this.restartKeyWasPressed = false;
+
+    if (!this.playfieldInitialized) return;
 
     // Если ожидаем нажатия кнопки "Старт" — только рендерим сцену
     if (this.isWaitingForStart) {
@@ -2074,6 +2087,11 @@ export class Game {
   }
 
   private render() {
+    if (!this.playfieldInitialized) {
+      this.postProcess.render();
+      return;
+    }
+
     // Render Food
     const foodCount = this.world.foodPositions.length;
     this.foodMesh.count = foodCount;

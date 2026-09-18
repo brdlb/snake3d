@@ -8,6 +8,7 @@
 ## Planning anchor
 
 - `src/main.ts` вызывает `networkManager.connect()` до `new Game()`; это нарушает границу первого запуска.
+- `Game` должен отложить создание `World`, стен, игровых mesh-объектов, змеи и Pathfinder: один только скрытый рендер поля всё равно создаёт игровое поле до выбора туториала.
 - `Game.handleGameStart()` всегда запрашивает комнату или загружает offline-фантомов; tutorial должен использовать отдельную локальную инициализацию.
 - Связанные активные спецификации `live-pause-and-orientation-propagation.md` и `room-phantom-roster-synchronization.md` переиспользуются без изменения серверных контрактов.
 
@@ -55,8 +56,9 @@ Requirements:
 2. [x] Add tutorial overlay UI and styles.
 3. [x] Add first-run bootstrap branch and local Game initialization.
 4. [x] Gate movement/effects and delayed post-death connection in `Game`.
-5. [x] Run `npm run cf:test` (56 tests), `npm run build`, `npm run lint`, `git diff --check`.
-6. [ ] Manual desktop/mobile browser smoke; deployment remains deferred.
+5. [x] Defer playfield construction until tutorial confirmation, while preserving automatic construction for completed onboarding.
+6. [x] Run focused and repository validation, including `npm run cf:test`, `npm run build`, `npm run lint`, and `git diff --check`.
+7. [ ] Manual desktop/mobile browser smoke; deployment remains deferred.
 
 ## Open questions
 
@@ -66,3 +68,4 @@ Requirements:
 
 - 2026-09-19: Keep tutorial state in a pure client module and leave realtime, Worker, D1, replay submission and room contracts unchanged.
 - 2026-09-19: Use localStorage marker `snake3d_onboarding_completed`; failed tutorial runs remain replayable.
+- 2026-09-19: A tutorial `Game` instance may create scene/UI infrastructure, but no playfield state or field renderables before the player confirms tutorial start. Returning players construct the playfield before the room flow begins.
