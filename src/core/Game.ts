@@ -77,6 +77,7 @@ export class Game {
   // Visuals
   private snakeMesh: THREE.InstancedMesh;
   private foodMesh: THREE.InstancedMesh;
+  private tutorialPlane: THREE.Mesh | null = null;
   private particleSystem: ParticleSystem;
 
   // Shared Materials
@@ -310,6 +311,18 @@ export class Game {
     this.foodMesh.count = this.world.FOOD_COUNT;
     this.foodMesh.castShadow = true;
     this.sceneManager.scene.add(this.foodMesh);
+    if (this.tutorialMode) {
+      this.world.foodPositions = [];
+      this.world.foodColors = [];
+      this.world.foodSounds = [];
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), this.foodMaterial);
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.set(WORLD_SIZE / 2, WORLD_SIZE / 2 - 0.5, WORLD_SIZE / 2);
+      plane.visible = false;
+      plane.receiveShadow = true;
+      this.tutorialPlane = plane;
+      this.sceneManager.scene.add(plane);
+    }
 
     // Scene Walls
     this.sceneManager.setupWalls(this.world.size);
@@ -697,6 +710,11 @@ export class Game {
     this.isSpectating = false;
     this.isWaitingForStart = false;
     this.tutorialBlocked = false;
+    if (this.tutorialPlane) {
+      this.tutorialPlane.visible = true;
+      this.tutorialPlane.position.copy(spawn).addScaledVector(up, -0.5);
+      this.tutorialPlane.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), up);
+    }
     this.setTutorialFood(0);
     this.tutorialUI?.hide();
     this.cameraController.stopOrbitMode();
@@ -735,6 +753,7 @@ export class Game {
     this.tutorial.completeExpansion();
     this.tutorialBlocked = false;
     this.tutorialUI?.hide();
+    if (this.tutorialPlane) this.tutorialPlane.visible = false;
     this.world.respawnFood(this.snake.segments);
     this.hud.togglePauseButton(true);
     return true;
@@ -1674,8 +1693,12 @@ export class Game {
           const turnHint = this.tutorial?.getLayout().requiredTurn === 'left'
             ? 'Desktop: A — влево. Mobile: свайп влево.'
             : 'Desktop: D — вправо. Mobile: свайп вправо.';
-          this.tutorialUI?.show('Отлично. Синий куб увеличивает змею. Теперь поверните к следующему кубу.', turnHint, null);
-          this.tutorialBlocked = false;
+          this.tutorialUI?.show('Отлично. Синий куб увеличивает змею. Нажмите продолжить, затем поверните к следующему кубу.', turnHint, () => {
+            this.tutorial?.confirm();
+            this.tutorialBlocked = false;
+            this.tutorialUI?.hide();
+            this.setTutorialFood(1);
+          });
         } else if (phase === 'acceleration_intro') {
           this.tutorialUI?.show('Рост освоен. Подтвердите, чтобы познакомиться с ускорением.', 'Нажмите ПРОДОЛЖИТЬ.', () => {
             this.tutorialBlocked = false;

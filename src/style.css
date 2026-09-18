@@ -945,7 +945,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.72);
+  background: #000;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
