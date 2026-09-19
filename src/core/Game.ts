@@ -751,8 +751,9 @@ export class Game {
 
   private handleTutorialTurn(action: 'left' | 'right'): boolean {
     if (!this.tutorial || this.tutorial.phase !== 'turn_gate') return false;
-    // The target is generated on the right side of the current forward vector.
-    if (action !== this.tutorial.getLayout().requiredTurn) return true;
+    // Do not consume the other turn action: regular input handling must still
+    // rotate the snake even when it is not the tutorial's suggested direction.
+    if (action !== this.tutorial.getLayout().requiredTurn) return false;
     this.snake.rotate(action === 'left' ? Math.PI / 2 : -Math.PI / 2);
     this.tutorialUI?.hide();
     this.setTutorialFood(1);
