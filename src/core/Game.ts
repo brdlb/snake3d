@@ -228,6 +228,10 @@ export class Game {
         this.postProcess.updateBloomConfig(this.settingsManager.bloomConfig);
       },
       () => {
+        localStorage.removeItem('snake3d_onboarding_completed');
+        window.location.reload();
+      },
+      () => {
         // On Close Callback
         this.settingsUI.hide();
         this.hud.togglePauseButton(true);
@@ -405,7 +409,7 @@ export class Game {
 
     if (this.tutorialMode) {
       this.tutorialUI = new TutorialUI();
-      this.tutorialUI.show('Начните обучение, чтобы освоить рост, ускорение, замедление и roll.', 'Нажмите кнопку — звук включится после вашего действия.', () => {
+      this.tutorialUI.show('Start the tutorial to learn growth, acceleration, deceleration, and rolling.', 'Click the button — sound will start after your first action.', () => {
         void this.startTutorial();
       });
     } else {
@@ -520,6 +524,7 @@ export class Game {
     this.foodMesh = new THREE.InstancedMesh(foodGeo, this.foodMaterial, this.world.FOOD_COUNT);
     this.foodMesh.count = this.world.FOOD_COUNT;
     this.foodMesh.castShadow = true;
+    this.foodMesh.frustumCulled = false;
     this.sceneManager.scene.add(this.foodMesh);
 
     if (this.tutorialMode) {
@@ -1706,30 +1711,30 @@ export class Game {
         this.tutorialBlocked = true;
         if (phase === 'turn_gate') {
           const turnHint = this.tutorial?.getLayout().requiredTurn === 'left'
-            ? 'Desktop: A — влево. Mobile: свайп влево.'
-            : 'Desktop: D — вправо. Mobile: свайп вправо.';
-          this.tutorialUI?.show('Отлично. Синий куб увеличивает змею. Нажмите продолжить, затем поверните к следующему кубу.', turnHint, () => {
+            ? 'Desktop: A — left. Mobile: swipe left.'
+            : 'Desktop: D — right. Mobile: swipe right.';
+          this.tutorialUI?.show('Great. The blue cube makes your snake grow. Click continue, then turn toward the next cube.', turnHint, () => {
             this.tutorial?.confirm();
             this.tutorialBlocked = false;
             this.tutorialUI?.hide();
             this.setTutorialFood(1);
           });
         } else if (phase === 'acceleration_intro') {
-          this.tutorialUI?.show('Рост освоен. Подтвердите, чтобы познакомиться с ускорением.', 'Нажмите ПРОДОЛЖИТЬ.', () => {
+          this.tutorialUI?.show('Growth mastered. Confirm to learn acceleration.', 'Click CONTINUE.', () => {
             this.tutorialBlocked = false;
             this.tutorial?.confirm();
             this.tutorialUI?.hide();
             this.setTutorialFood(2);
           });
         } else if (phase === 'slowdown_intro') {
-          this.tutorialUI?.show('Зелёный куб ускоряет движение. Теперь попробуйте замедление.', 'Розовый куб замедляет змею.', () => {
+          this.tutorialUI?.show('The green cube speeds you up. Now try deceleration.', 'The pink cube slows your snake down.', () => {
             this.tutorialBlocked = false;
             this.tutorial?.confirm();
             this.tutorialUI?.hide();
             this.setTutorialFood(3);
           });
         } else if (phase === 'roll_gate') {
-          this.tutorialUI?.show('Последний шаг — roll вокруг оси движения.', 'Desktop: Q/E. Mobile: вертикальный свайп.', null);
+          this.tutorialUI?.show('The final step is rolling around your movement axis.', 'Desktop: Q/E. Mobile: vertical swipe.', null);
         }
         return;
       }

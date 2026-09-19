@@ -7,7 +7,7 @@ export class TutorialUI {
   public constructor() {
     this.container = document.createElement('div');
     this.container.className = 'tutorial-overlay active';
-    this.container.innerHTML = '<div class="tutorial-card"><h2>ОБУЧЕНИЕ</h2><p></p><div class="tutorial-hint"></div><button type="button">ПРОДОЛЖИТЬ</button></div>';
+    this.container.innerHTML = '<div class="tutorial-card"><h2>TUTORIAL</h2><p></p><div class="tutorial-hint"></div><button type="button">CONTINUE</button></div>';
     this.message = this.container.querySelector('p')!;
     this.action = this.container.querySelector('button')!;
     this.action.addEventListener('click', () => this.onConfirm?.());
@@ -25,4 +25,3 @@ export class TutorialUI {
   public hide(): void { this.container.classList.remove('active'); }
   public dispose(): void { this.container.remove(); }
 }
-

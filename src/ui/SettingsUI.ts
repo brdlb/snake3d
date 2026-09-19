@@ -6,6 +6,7 @@ export class SettingsUI {
     private info: HTMLDivElement;
     private settingsManager: SettingsManager;
     private onSettingsChange: () => void;
+    private onTutorialRestart: () => void;
     private onClose: () => void;
     private closeBtn: HTMLButtonElement;
 
@@ -14,10 +15,12 @@ export class SettingsUI {
     constructor(
         settingsManager: SettingsManager,
         onSettingsChange: () => void,
+        onTutorialRestart: () => void,
         onClose: () => void
     ) {
         this.settingsManager = settingsManager;
         this.onSettingsChange = onSettingsChange;
+        this.onTutorialRestart = onTutorialRestart;
         this.onClose = onClose;
 
         // Overlay for black background
@@ -157,6 +160,24 @@ export class SettingsUI {
 
             .control-group {
                 margin-bottom: 12px;
+            }
+
+            .settings-action-btn {
+                width: 100%;
+                margin-bottom: 12px;
+                padding: 10px 14px;
+                color: #fff;
+                background: rgba(0, 136, 255, 0.12);
+                border: 1px solid #0088ff;
+                font: 700 12px 'Jura', system-ui, sans-serif;
+                letter-spacing: 1.5px;
+                cursor: pointer;
+                transition: background 0.2s, color 0.2s;
+            }
+
+            .settings-action-btn:hover {
+                color: #000;
+                background: #0088ff;
             }
 
             /* Reusing slider styles from before or ensuring they work here */
@@ -338,6 +359,14 @@ export class SettingsUI {
         createSection('Audio');
         createAudioControl('Food Radius', 'foodSoundRadius', 0, 2, 0.1);
         createAudioControl('Volume', 'volume', 0, 3, 0.01);
+
+        createSection('Tutorial');
+        const restartTutorialButton = document.createElement('button');
+        restartTutorialButton.type = 'button';
+        restartTutorialButton.className = 'settings-action-btn';
+        restartTutorialButton.innerText = 'RESTART TUTORIAL';
+        restartTutorialButton.addEventListener('click', () => this.onTutorialRestart());
+        this.panel.appendChild(restartTutorialButton);
     }
 
     public dispose() {
