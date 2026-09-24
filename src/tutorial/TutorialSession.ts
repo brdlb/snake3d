@@ -39,7 +39,7 @@ export class TutorialSession {
     const side = new THREE.Vector3().crossVectors(up, forward).normalize();
     const left = forward.clone().applyAxisAngle(up, Math.PI / 2);
     const requiredTurn = left.distanceToSquared(side) < 0.1 ? 'left' : 'right';
-    const growth = spawn.clone().addScaledVector(forward, 5);
+    const growth = spawn.clone().addScaledVector(forward, 6);
     const turnTarget = growth.clone().addScaledVector(forward, 3).addScaledVector(side, 2);
     const effects: TutorialCollectibleEffect[] = ['acceleration', 'slowdown', 'roll'];
     const effect = effects[Math.floor(random() * effects.length)];

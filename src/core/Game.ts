@@ -712,9 +712,10 @@ export class Game {
     if (!this.tutorialMode || this.tutorial) return;
     this.initializePlayfield();
     await this.soundManager.initAudio();
-    const spawn = new THREE.Vector3(Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2));
     const direction = new THREE.Vector3(0, 0, -1);
     const up = new THREE.Vector3(0, 1, 0);
+    const spawn = new THREE.Vector3(Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2))
+      .addScaledVector(direction, -5);
     this.tutorial = new TutorialSession(spawn, direction, up);
     this.snake.reset(spawn, new THREE.Quaternion());
     this.world.setSeed(1337);

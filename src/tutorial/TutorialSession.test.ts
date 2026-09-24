@@ -13,8 +13,8 @@ describe('TutorialSession', () => {
     const collectibles = session.getLayout().collectibles;
     const [first, second] = collectibles;
     const last = collectibles[4];
-    expect(first.position).toEqual(new THREE.Vector3(15, 10, 10));
-    expect(second.position).toEqual(new THREE.Vector3(18, 10, 8));
+    expect(first.position).toEqual(new THREE.Vector3(16, 10, 10));
+    expect(second.position).toEqual(new THREE.Vector3(19, 10, 8));
     expect(last.position.y).toBe(13);
     expect(session.getLayout().requiredTurn).toBe('left');
   });
