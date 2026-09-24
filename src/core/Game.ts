@@ -718,6 +718,8 @@ export class Game {
       .addScaledVector(direction, -5);
     this.tutorial = new TutorialSession(spawn, direction, up);
     this.snake.reset(spawn, new THREE.Quaternion());
+    this.currentSPM = 150;
+    this.snake.setSpeed(60 / this.currentSPM);
     this.world.setSeed(1337);
     this.phantoms = [];
     this.liveOpponents = [];
@@ -767,6 +769,8 @@ export class Game {
     this.tutorial.acceptRoll();
     localStorage.setItem('snake3d_onboarding_completed', '1');
     this.tutorial.completeExpansion();
+    this.currentSPM = 300;
+    this.snake.setSpeed(60 / this.currentSPM);
     this.tutorialBlocked = false;
     this.tutorialUI?.hide();
     this.sceneManager.setWallsVisible(true);
