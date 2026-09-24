@@ -33,7 +33,6 @@ export class TutorialSession {
     spawn: THREE.Vector3,
     direction: THREE.Vector3,
     up: THREE.Vector3,
-    random: () => number = Math.random,
   ) {
     const forward = direction.clone().normalize();
     const side = new THREE.Vector3().crossVectors(up, forward).normalize();
@@ -41,8 +40,6 @@ export class TutorialSession {
     const requiredTurn = left.distanceToSquared(side) < 0.1 ? 'left' : 'right';
     const growth = spawn.clone().addScaledVector(forward, 6);
     const turnTarget = growth.clone().addScaledVector(forward, 3).addScaledVector(side, 2);
-    const effects: TutorialCollectibleEffect[] = ['acceleration', 'slowdown', 'roll'];
-    const effect = effects[Math.floor(random() * effects.length)];
     this.layout = {
       spawn: spawn.clone(),
       direction: forward,
@@ -51,9 +48,8 @@ export class TutorialSession {
       collectibles: [
         { position: growth, effect: 'growth' },
         { position: turnTarget, effect: 'growth' },
-        { position: spawn.clone().addScaledVector(up, 2).addScaledVector(forward, 2), effect: 'acceleration' },
-        { position: spawn.clone().addScaledVector(up, 2).addScaledVector(forward, 4), effect: 'slowdown' },
-        { position: spawn.clone().addScaledVector(up, 3).addScaledVector(forward, 2), effect },
+        { position: turnTarget.clone().addScaledVector(side, 3), effect: 'acceleration' },
+        { position: turnTarget.clone().addScaledVector(side, 6), effect: 'slowdown' },
       ],
     };
   }

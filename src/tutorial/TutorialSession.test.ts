@@ -8,19 +8,19 @@ describe('TutorialSession', () => {
       new THREE.Vector3(10, 10, 10),
       new THREE.Vector3(1, 0, 0),
       new THREE.Vector3(0, 1, 0),
-      () => 0,
     );
     const collectibles = session.getLayout().collectibles;
-    const [first, second] = collectibles;
-    const last = collectibles[4];
+    const [first, second, green, pink] = collectibles;
     expect(first.position).toEqual(new THREE.Vector3(16, 10, 10));
     expect(second.position).toEqual(new THREE.Vector3(19, 10, 8));
-    expect(last.position.y).toBe(13);
+    expect(green.position).toEqual(new THREE.Vector3(19, 10, 5));
+    expect(pink.position).toEqual(new THREE.Vector3(19, 10, 2));
+    expect(collectibles).toHaveLength(4);
     expect(session.getLayout().requiredTurn).toBe('left');
   });
 
   it('advances only through the required phases', () => {
-    const session = new TutorialSession(new THREE.Vector3(), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0), () => 0.9);
+    const session = new TutorialSession(new THREE.Vector3(), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0));
     expect(session.collect('growth')).toBe('turn_gate');
     expect(session.collect('growth')).toBe('acceleration_intro');
     expect(session.confirm()).toBe('acceleration_intro');

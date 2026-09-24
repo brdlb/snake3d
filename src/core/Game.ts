@@ -1700,8 +1700,8 @@ export class Game {
     if (foodIndex !== -1) {
       const eatenColor = this.world.foodColors[foodIndex] || new THREE.Color(0x0088ff);
 
-      if (this.tutorialMode && this.tutorial) {
-        const currentIndex = this.tutorial.phase === 'extension_intro' ? 0 : this.tutorial.phase === 'turn_gate' ? 1 : this.tutorial.phase === 'acceleration_intro' ? 2 : this.tutorial.phase === 'slowdown_intro' ? 3 : 4;
+      if (this.tutorialMode && this.tutorial && this.tutorial.phase !== 'standard_game') {
+        const currentIndex = this.tutorial.phase === 'extension_intro' ? 0 : this.tutorial.phase === 'turn_gate' ? 1 : this.tutorial.phase === 'acceleration_intro' ? 2 : 3;
         const effect: TutorialCollectibleEffect = this.tutorial.getLayout().collectibles[currentIndex]?.effect ?? 'growth';
         const phase = this.tutorial.collect(effect);
         if (effect === 'growth') {
