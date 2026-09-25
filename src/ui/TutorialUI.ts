@@ -6,6 +6,7 @@ export class TutorialUI {
   private readonly action: HTMLButtonElement;
   private readonly editor: HTMLDivElement;
   private readonly turnHints: HTMLDivElement;
+  private readonly rollHints: HTMLDivElement;
   private onConfirm: (() => void) | null = null;
 
   public constructor() {
@@ -21,10 +22,16 @@ export class TutorialUI {
     this.turnHints.className = 'tutorial-turn-hints';
     this.turnHints.innerHTML = '<div class="tutorial-turn-hint"><span class="tutorial-turn-arrow">←</span><span class="tutorial-turn-desktop">A</span><span class="tutorial-turn-mobile">SWIPE LEFT</span></div><div class="tutorial-turn-hint"><span class="tutorial-turn-arrow">→</span><span class="tutorial-turn-desktop">D</span><span class="tutorial-turn-mobile">SWIPE RIGHT</span></div>';
     document.body.appendChild(this.turnHints);
+    this.rollHints = document.createElement('div');
+    this.rollHints.className = 'tutorial-turn-hints tutorial-roll-hints';
+    this.rollHints.innerHTML = '<div class="tutorial-turn-hint"><span class="tutorial-turn-arrow">↶</span><span class="tutorial-turn-desktop">Q</span><span class="tutorial-turn-mobile">SWIPE ↑ / ↓</span></div><div class="tutorial-turn-hint"><span class="tutorial-turn-arrow">↷</span><span class="tutorial-turn-desktop">E</span><span class="tutorial-turn-mobile">SWIPE ↑ / ↓</span></div>';
+    document.body.appendChild(this.rollHints);
   }
 
   public showTurnHints(): void { this.turnHints.classList.add('active'); }
   public hideTurnHints(): void { this.turnHints.classList.remove('active'); }
+  public showRollHints(): void { this.rollHints.classList.add('active'); }
+  public hideRollHints(): void { this.rollHints.classList.remove('active'); }
 
   public show(message: string, hint = '', onConfirm: (() => void) | null = null): void {
     this.container.classList.remove('introduction');
@@ -104,5 +111,5 @@ export class TutorialUI {
   }
 
   public hide(): void { this.container.classList.remove('active'); }
-  public dispose(): void { this.container.remove(); this.turnHints.remove(); }
+  public dispose(): void { this.container.remove(); this.turnHints.remove(); this.rollHints.remove(); }
 }

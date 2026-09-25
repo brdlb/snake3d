@@ -749,6 +749,7 @@ export class Game {
     this.setTutorialFood(0);
     this.tutorialUI?.hide();
     this.tutorialUI?.hideTurnHints();
+    this.tutorialUI?.hideRollHints();
     this.cameraController.stopOrbitMode();
     this.hud.togglePauseButton(false);
   }
@@ -786,20 +787,22 @@ export class Game {
   private handleTutorialRoll(action: 'left' | 'right'): boolean {
     if (!this.tutorial || this.tutorial.phase !== 'roll_gate') return false;
     this.snake.roll(action === 'left' ? -Math.PI / 2 : Math.PI / 2);
-    this.tutorial.acceptRoll();
-    localStorage.setItem('snake3d_onboarding_completed', '1');
-    void this.finishTutorialAccount();
-    this.tutorial.completeExpansion();
-    this.currentSPM = 300;
-    this.snake.setSpeed(60 / this.currentSPM);
-    this.tutorialBlocked = false;
-    this.tutorialUI?.hide();
-    this.cameraController.stopOrbitMode();
-    this.sceneManager.setWallsVisible(true);
-    if (this.tutorialPlane) this.tutorialPlane.visible = false;
-    this.world.respawnFood(this.snake.segments);
-    this.hud.togglePauseButton(true);
     return true;
+  }
+
+  private setTutorialRollFood(): void {
+    const head = this.snake.getHead();
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction).round();
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.snake.direction).round();
+    const position = head.clone().addScaledVector(forward, 3).addScaledVector(up, 3);
+    this.world.foodPositions = [position];
+    this.world.foodColors = [new THREE.Color(FOOD_COLORS.BLUE)];
+    this.world.foodSounds = [2];
+  }
+
+  private finishTutorial(): void {
+    localStorage.setItem('snake3d_onboarding_completed', '1');
+    void this.finishTutorialAccount().finally(() => window.location.reload());
   }
 
   private async finishTutorialAccount(): Promise<void> {
@@ -1761,7 +1764,9 @@ export class Game {
 
       if (this.tutorialMode && this.tutorial && this.tutorial.phase !== 'standard_game') {
         const currentIndex = this.tutorial.phase === 'extension_intro' ? 0 : this.tutorial.phase === 'turn_gate' ? 1 : this.tutorial.phase === 'acceleration_intro' ? 2 : 3;
-        const effect: TutorialCollectibleEffect = this.tutorial.getLayout().collectibles[currentIndex]?.effect ?? 'growth';
+        const effect: TutorialCollectibleEffect = this.tutorial.phase === 'roll_gate'
+          ? 'roll'
+          : this.tutorial.getLayout().collectibles[currentIndex]?.effect ?? 'growth';
         const phase = this.tutorial.collect(effect);
         if (effect === 'growth') {
           for (let i = 0; i < 5; i++) this.snake.grow();
@@ -1787,7 +1792,12 @@ export class Game {
           this.tutorialBlocked = false;
           this.setTutorialFood(3);
         } else if (phase === 'roll_gate') {
-          this.tutorialUI?.show('The final step is rolling around your movement axis.', 'Desktop: Q/E. Mobile: vertical swipe.', null);
+          this.tutorialBlocked = false;
+          this.setTutorialRollFood();
+          this.tutorialUI?.showRollHints();
+        } else if (phase === 'expanding_world') {
+          this.tutorialUI?.hideRollHints();
+          this.tutorialUI?.show('You are ready. Enter the world!', '', () => this.finishTutorial());
           this.cameraController.setOrbitMode(head);
         }
         return;

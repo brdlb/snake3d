@@ -27,6 +27,7 @@ export interface TutorialLayout {
 /** Pure layout/state helper. Gameplay and rendering stay in Game. */
 export class TutorialSession {
   public phase: TutorialPhase = 'extension_intro';
+  private rollCollectiblesCollected = 0;
   private readonly layout: TutorialLayout;
 
   public constructor(
@@ -70,16 +71,17 @@ export class TutorialSession {
     else if (this.phase === 'turn_gate' && effect === 'growth') this.phase = 'acceleration_intro';
     else if (this.phase === 'acceleration_intro' && effect === 'acceleration') this.phase = 'slowdown_intro';
     else if (this.phase === 'slowdown_intro' && effect === 'slowdown') this.phase = 'roll_gate';
+    else if (this.phase === 'roll_gate' && effect === 'roll') {
+      this.rollCollectiblesCollected++;
+      if (this.rollCollectiblesCollected === 3) this.phase = 'expanding_world';
+    }
     return this.phase;
   }
+
+  public getRollCollectiblesCollected(): number { return this.rollCollectiblesCollected; }
 
   public confirm(): TutorialPhase {
     if (this.phase === 'extension_intro') this.phase = 'turn_gate';
-    return this.phase;
-  }
-
-  public acceptRoll(): TutorialPhase {
-    if (this.phase === 'roll_gate') this.phase = 'expanding_world';
     return this.phase;
   }
 

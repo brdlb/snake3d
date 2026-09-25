@@ -27,7 +27,11 @@ describe('TutorialSession', () => {
     expect(session.collect('acceleration')).toBe('slowdown_intro');
     expect(session.confirm()).toBe('slowdown_intro');
     expect(session.collect('slowdown')).toBe('roll_gate');
-    expect(session.acceptRoll()).toBe('expanding_world');
+    expect(session.collect('roll')).toBe('roll_gate');
+    expect(session.getRollCollectiblesCollected()).toBe(1);
+    expect(session.collect('roll')).toBe('roll_gate');
+    expect(session.collect('roll')).toBe('expanding_world');
+    expect(session.getRollCollectiblesCollected()).toBe(3);
     expect(session.completeExpansion()).toBe('standard_game');
   });
 });
