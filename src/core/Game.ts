@@ -748,6 +748,7 @@ export class Game {
     }
     this.setTutorialFood(0);
     this.tutorialUI?.hide();
+    this.tutorialUI?.hideTurnHints();
     this.cameraController.stopOrbitMode();
     this.hud.togglePauseButton(false);
   }
@@ -777,6 +778,7 @@ export class Game {
     if (action !== this.tutorial.getLayout().requiredTurn) return false;
     this.snake.rotate(action === 'left' ? Math.PI / 2 : -Math.PI / 2);
     this.tutorialUI?.hide();
+    this.tutorialUI?.hideTurnHints();
     this.setTutorialFood(1);
     return true;
   }
@@ -1768,24 +1770,18 @@ export class Game {
         } else if (effect === 'slowdown') {
           this.currentSPM = Math.max(60, this.currentSPM - 10);
         }
+        this.particleSystem.emit(head, this.snake.direction, 30, eatenColor);
         this.world.foodPositions = [];
         this.world.foodColors = [];
         this.world.foodSounds = [];
         this.tutorialBlocked = true;
         if (phase === 'turn_gate') {
-          const turnHint = this.tutorial?.getLayout().requiredTurn === 'left'
-            ? 'Desktop: A — left. Mobile: swipe left.'
-            : 'Desktop: D — right. Mobile: swipe right.';
-          this.tutorialUI?.show('Great. Click continue, then turn toward the next cube.', turnHint, () => {
-            this.tutorial?.confirm();
-            this.tutorialBlocked = false;
-            this.tutorialUI?.hide();
-            this.cameraController.stopOrbitMode();
-            this.setTutorialFood(1);
-          });
-          this.cameraController.setOrbitMode(head);
+          this.tutorialBlocked = false;
+          this.setTutorialFood(1);
+          this.tutorialUI?.showTurnHints();
         } else if (phase === 'acceleration_intro') {
           this.tutorialBlocked = false;
+          this.tutorialUI?.hideTurnHints();
           this.setTutorialFood(2);
         } else if (phase === 'slowdown_intro') {
           this.tutorialBlocked = false;

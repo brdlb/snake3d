@@ -5,6 +5,7 @@ export class TutorialUI {
   private readonly message: HTMLParagraphElement;
   private readonly action: HTMLButtonElement;
   private readonly editor: HTMLDivElement;
+  private readonly turnHints: HTMLDivElement;
   private onConfirm: (() => void) | null = null;
 
   public constructor() {
@@ -16,7 +17,14 @@ export class TutorialUI {
     this.action = this.container.querySelector('button:not(.tutorial-skip)')!;
     this.action.addEventListener('click', () => this.onConfirm?.());
     document.body.appendChild(this.container);
+    this.turnHints = document.createElement('div');
+    this.turnHints.className = 'tutorial-turn-hints';
+    this.turnHints.innerHTML = '<div class="tutorial-turn-hint"><span class="tutorial-turn-arrow">←</span><span class="tutorial-turn-desktop">A</span><span class="tutorial-turn-mobile">SWIPE LEFT</span></div><div class="tutorial-turn-hint"><span class="tutorial-turn-arrow">→</span><span class="tutorial-turn-desktop">D</span><span class="tutorial-turn-mobile">SWIPE RIGHT</span></div>';
+    document.body.appendChild(this.turnHints);
   }
+
+  public showTurnHints(): void { this.turnHints.classList.add('active'); }
+  public hideTurnHints(): void { this.turnHints.classList.remove('active'); }
 
   public show(message: string, hint = '', onConfirm: (() => void) | null = null): void {
     this.container.classList.remove('introduction');
@@ -96,5 +104,5 @@ export class TutorialUI {
   }
 
   public hide(): void { this.container.classList.remove('active'); }
-  public dispose(): void { this.container.remove(); }
+  public dispose(): void { this.container.remove(); this.turnHints.remove(); }
 }
