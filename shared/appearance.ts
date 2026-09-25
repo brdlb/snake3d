@@ -6,9 +6,35 @@ export type SnakeAppearance = {
 
 export const DEFAULT_SNAKE_APPEARANCE: SnakeAppearance = {
   patternSeed: 1847,
-  backgroundColor: '#18212f',
-  patternColor: '#4ade80',
+  backgroundColor: '#311a1a',
+  patternColor: '#b38c8c',
 };
+
+/** Builds a hex color from HSL components, with hue in degrees and S/L in percent. */
+export function hslToHex(hue: number, saturation: number, lightness: number): string {
+  const h = ((hue % 360) + 360) % 360;
+  const s = Math.max(0, Math.min(100, saturation)) / 100;
+  const l = Math.max(0, Math.min(100, lightness)) / 100;
+  const chroma = (1 - Math.abs(2 * l - 1)) * s;
+  const section = h / 60;
+  const x = chroma * (1 - Math.abs((section % 2) - 1));
+  const [r, g, b] = section < 1 ? [chroma, x, 0]
+    : section < 2 ? [x, chroma, 0]
+      : section < 3 ? [0, chroma, x]
+        : section < 4 ? [0, x, chroma]
+          : section < 5 ? [x, 0, chroma]
+            : [chroma, 0, x];
+  const m = l - chroma / 2;
+  return `#${[r, g, b].map((channel) => Math.round((channel + m) * 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
+export function randomizeSnakeColors(random = Math.random): Pick<SnakeAppearance, 'backgroundColor' | 'patternColor'> {
+  const hue = random() * 360;
+  return {
+    backgroundColor: hslToHex(hue, 30, 15),
+    patternColor: hslToHex(hue, 30, 70),
+  };
+}
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 

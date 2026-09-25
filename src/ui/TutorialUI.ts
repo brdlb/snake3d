@@ -1,4 +1,4 @@
-import { generateSnakePattern, type SnakeAppearance } from '../../shared/appearance';
+import { generateSnakePattern, randomizeSnakeColors, type SnakeAppearance } from '../../shared/appearance';
 
 export class TutorialUI {
   private readonly container: HTMLDivElement;
@@ -84,6 +84,9 @@ export class TutorialUI {
     seed.addEventListener('change', commit);
     random.addEventListener('click', () => {
       seed.value = String(crypto.getRandomValues(new Uint32Array(1))[0]);
+      const colors = randomizeSnakeColors();
+      background.value = colors.backgroundColor;
+      ornament.value = colors.patternColor;
       commit();
     });
     background.addEventListener('input', commit);

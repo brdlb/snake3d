@@ -63,7 +63,7 @@ export class PauseUI {
         onSettings: () => void,
         onLeaderboard: () => void,
         onOrientationLockChange?: (locked: boolean) => void,
-        appearance: SnakeAppearance = { patternSeed: 1847, backgroundColor: '#18212f', patternColor: '#4ade80' },
+        appearance: SnakeAppearance = { patternSeed: 1847, backgroundColor: '#000000', patternColor: '#ffffff' },
         onAppearanceChange: (appearance: SnakeAppearance) => void = () => {},
     ) {
         this.onResume = onResume;
@@ -130,13 +130,16 @@ export class PauseUI {
         randomButton.textContent = 'RANDOM';
         randomButton.onclick = () => {
             this.seedInput.value = String(crypto.getRandomValues(new Uint32Array(1))[0]);
+            const colors = randomizeSnakeColors();
+            this.backgroundInput.value = colors.backgroundColor;
+            this.patternInput.value = colors.patternColor;
             this.commitAppearance();
         };
         seedRow.append(seedLabel, this.seedInput, randomButton);
         const colors = document.createElement('div');
         colors.className = 'appearance-colors';
-        this.backgroundInput = this.createColorInput('BACKGROUND', this.appearance.backgroundColor);
-        this.patternInput = this.createColorInput('ORNAMENT', this.appearance.patternColor);
+        this.backgroundInput = this.createColorInput('COLOR A', this.appearance.backgroundColor);
+        this.patternInput = this.createColorInput('COLOR B', this.appearance.patternColor);
         colors.append(this.backgroundInput.parentElement!, this.patternInput.parentElement!);
         controls.append(seedRow, colors);
         appearancePanel.append(appearanceTitle, identity, this.patternCanvas, controls);
@@ -632,4 +635,4 @@ export class PauseUI {
         this.container.remove();
     }
 }
-import { generateSnakePattern, type SnakeAppearance } from '../../shared/appearance';
+import { generateSnakePattern, randomizeSnakeColors, type SnakeAppearance } from '../../shared/appearance';
