@@ -3,7 +3,7 @@ import type { SnakeAppearance } from '../../shared/appearance';
 import { snakePatternBits } from '../../shared/appearance';
 
 const vertexShader = `
-  attribute vec3 instanceColor;
+  attribute vec3 instanceBackgroundColor;
   attribute vec3 instancePatternColor;
   attribute float instancePatternBits;
   varying vec2 patternUv;
@@ -12,7 +12,7 @@ const vertexShader = `
   varying float patternBits;
   void main() {
     patternUv = uv;
-    backgroundColor = instanceColor;
+    backgroundColor = instanceBackgroundColor;
     ornamentColor = instancePatternColor;
     patternBits = instancePatternBits;
     vec4 worldPosition = instanceMatrix * vec4(position, 1.0);
@@ -49,6 +49,7 @@ export function createSnakePatternMesh(
   opacity = 1,
 ): THREE.InstancedMesh {
   const geometry = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+  geometry.setAttribute('instanceBackgroundColor', new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3));
   geometry.setAttribute('instancePatternColor', new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3));
   geometry.setAttribute('instancePatternBits', new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1));
   const material = new THREE.ShaderMaterial({
@@ -64,16 +65,18 @@ export function createSnakePatternMesh(
 }
 
 export function setSnakePatternAt(mesh: THREE.InstancedMesh, index: number, appearance: SnakeAppearance) {
-  mesh.setColorAt(index, new THREE.Color(appearance.backgroundColor));
+  const backgrounds = mesh.geometry.getAttribute('instanceBackgroundColor') as THREE.InstancedBufferAttribute;
   const colors = mesh.geometry.getAttribute('instancePatternColor') as THREE.InstancedBufferAttribute;
   const bits = mesh.geometry.getAttribute('instancePatternBits') as THREE.InstancedBufferAttribute;
+  const background = new THREE.Color(appearance.backgroundColor);
   const color = new THREE.Color(appearance.patternColor);
+  backgrounds.setXYZ(index, background.r, background.g, background.b);
   colors.setXYZ(index, color.r, color.g, color.b);
   bits.setX(index, snakePatternBits(appearance.patternSeed));
 }
 
 export function markSnakePatternsUpdated(mesh: THREE.InstancedMesh) {
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  (mesh.geometry.getAttribute('instanceBackgroundColor') as THREE.InstancedBufferAttribute).needsUpdate = true;
   (mesh.geometry.getAttribute('instancePatternColor') as THREE.InstancedBufferAttribute).needsUpdate = true;
   (mesh.geometry.getAttribute('instancePatternBits') as THREE.InstancedBufferAttribute).needsUpdate = true;
 }
