@@ -1,4 +1,4 @@
-import { generateSnakePattern, randomizeSnakeColors, type SnakeAppearance } from '../../shared/appearance';
+import { generateSnakePattern, getSnakeAppearanceHue, randomizeSnakeColors, snakeColorsForHue, type SnakeAppearance } from '../../shared/appearance';
 
 export class TutorialUI {
   private readonly container: HTMLDivElement;
@@ -47,12 +47,11 @@ export class TutorialUI {
     const random = document.createElement('button');
     random.type = 'button';
     random.textContent = 'RANDOM';
-    const background = document.createElement('input');
-    background.type = 'color';
-    background.value = appearance.backgroundColor;
-    const ornament = document.createElement('input');
-    ornament.type = 'color';
-    ornament.value = appearance.patternColor;
+    const hue = document.createElement('input');
+    hue.type = 'range';
+    hue.min = '0';
+    hue.max = '359';
+    hue.value = String(getSnakeAppearanceHue(appearance));
     const label = (title: string, input: HTMLElement) => {
       const element = document.createElement('label');
       const text = document.createElement('span');
@@ -64,8 +63,7 @@ export class TutorialUI {
       const parsed = Number(seed.value);
       appearance = {
         patternSeed: Number.isInteger(parsed) && parsed >= 0 ? parsed >>> 0 : 0,
-        backgroundColor: background.value,
-        patternColor: ornament.value,
+        ...snakeColorsForHue(Number(hue.value)),
       };
       seed.value = String(appearance.patternSeed);
       draw();
@@ -85,13 +83,11 @@ export class TutorialUI {
     random.addEventListener('click', () => {
       seed.value = String(crypto.getRandomValues(new Uint32Array(1))[0]);
       const colors = randomizeSnakeColors();
-      background.value = colors.backgroundColor;
-      ornament.value = colors.patternColor;
+      hue.value = String(getSnakeAppearanceHue({ backgroundColor: colors.backgroundColor }));
       commit();
     });
-    background.addEventListener('input', commit);
-    ornament.addEventListener('input', commit);
-    this.editor.append(canvas, label('SEED', seed), random, label('BACKGROUND', background), label('ORNAMENT', ornament));
+    hue.addEventListener('input', commit);
+    this.editor.append(canvas, label('SEED', seed), random, label('HUE', hue));
     draw();
     this.action.textContent = 'I\'M HAPPY';
     const skip = this.container.querySelector('.tutorial-skip') as HTMLButtonElement;

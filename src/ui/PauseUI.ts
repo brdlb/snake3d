@@ -55,8 +55,7 @@ export class PauseUI {
     private onAppearanceChange: (appearance: SnakeAppearance) => void;
     private patternCanvas!: HTMLCanvasElement;
     private seedInput!: HTMLInputElement;
-    private backgroundInput!: HTMLInputElement;
-    private patternInput!: HTMLInputElement;
+    private hueInput!: HTMLInputElement;
 
     constructor(
         onResume: () => void,
@@ -131,16 +130,23 @@ export class PauseUI {
         randomButton.onclick = () => {
             this.seedInput.value = String(crypto.getRandomValues(new Uint32Array(1))[0]);
             const colors = randomizeSnakeColors();
-            this.backgroundInput.value = colors.backgroundColor;
-            this.patternInput.value = colors.patternColor;
+            this.hueInput.value = String(getSnakeAppearanceHue({ backgroundColor: colors.backgroundColor }));
             this.commitAppearance();
         };
         seedRow.append(seedLabel, this.seedInput, randomButton);
         const colors = document.createElement('div');
         colors.className = 'appearance-colors';
-        this.backgroundInput = this.createColorInput('COLOR A', this.appearance.backgroundColor);
-        this.patternInput = this.createColorInput('COLOR B', this.appearance.patternColor);
-        colors.append(this.backgroundInput.parentElement!, this.patternInput.parentElement!);
+        this.hueInput = document.createElement('input');
+        this.hueInput.type = 'range';
+        this.hueInput.min = '0';
+        this.hueInput.max = '359';
+        this.hueInput.value = String(getSnakeAppearanceHue(this.appearance));
+        this.hueInput.oninput = () => this.commitAppearance();
+        const hueLabel = document.createElement('label');
+        const hueText = document.createElement('span');
+        hueText.textContent = 'HUE';
+        hueLabel.append(hueText, this.hueInput);
+        colors.append(hueLabel);
         controls.append(seedRow, colors);
         appearancePanel.append(appearanceTitle, identity, this.patternCanvas, controls);
 
@@ -523,31 +529,18 @@ export class PauseUI {
         this.previewAppearance = { ...snake.appearance };
         if (isSelf) {
             this.seedInput.value = String(this.appearance.patternSeed);
-            this.backgroundInput.value = this.appearance.backgroundColor;
-            this.patternInput.value = this.appearance.patternColor;
+            this.hueInput.value = String(getSnakeAppearanceHue(this.appearance));
         }
         this.drawPattern();
         this.updateStats(snake.stats);
     }
 
-    private createColorInput(labelText: string, value: string): HTMLInputElement {
-        const label = document.createElement('label');
-        const text = document.createElement('span');
-        text.textContent = labelText;
-        const input = document.createElement('input');
-        input.type = 'color';
-        input.value = value;
-        input.oninput = () => this.commitAppearance();
-        label.append(text, input);
-        return input;
-    }
-
     private commitAppearance() {
         const parsedSeed = Number(this.seedInput.value);
+        const colors = snakeColorsForHue(Number(this.hueInput.value));
         this.appearance = {
             patternSeed: Number.isInteger(parsedSeed) && parsedSeed >= 0 ? parsedSeed >>> 0 : 0,
-            backgroundColor: this.backgroundInput.value,
-            patternColor: this.patternInput.value,
+            ...colors,
         };
         this.previewAppearance = { ...this.appearance };
         this.seedInput.value = String(this.appearance.patternSeed);
@@ -570,8 +563,7 @@ export class PauseUI {
         this.appearance = { ...appearance };
         this.previewAppearance = { ...appearance };
         this.seedInput.value = String(appearance.patternSeed);
-        this.backgroundInput.value = appearance.backgroundColor;
-        this.patternInput.value = appearance.patternColor;
+        this.hueInput.value = String(getSnakeAppearanceHue(appearance));
         this.drawPattern();
     }
 
@@ -633,4 +625,4 @@ export class PauseUI {
         this.container.remove();
     }
 }
-import { generateSnakePattern, randomizeSnakeColors, type SnakeAppearance } from '../../shared/appearance';
+import { generateSnakePattern, getSnakeAppearanceHue, randomizeSnakeColors, snakeColorsForHue, type SnakeAppearance } from '../../shared/appearance';
