@@ -19,6 +19,7 @@ export class TutorialUI {
   }
 
   public show(message: string, hint = '', onConfirm: (() => void) | null = null): void {
+    this.container.classList.remove('introduction');
     this.editor.hidden = true;
     this.action.textContent = 'CONTINUE';
     this.message.textContent = message.toUpperCase();
@@ -31,6 +32,7 @@ export class TutorialUI {
 
   public showIntroduction(appearance: SnakeAppearance, onChange: (appearance: SnakeAppearance) => void, onConfirm: () => void, onSkip: () => void): void {
     this.show('Hello! First, choose your pattern.', '', onConfirm);
+    this.container.classList.add('introduction');
     this.editor.replaceChildren();
     this.editor.hidden = false;
     const canvas = document.createElement('canvas');
