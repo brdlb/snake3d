@@ -188,7 +188,7 @@ export class Game {
       this.appearanceSaveTimer = null;
       this.networkManager.sendAppearance(this.appearance);
       const user = this.networkManager.getUser();
-      if (user) void this.networkManager.updateUser({ settings: { ...user.settings, snakeAppearance: this.appearance } })
+      if (user && (!this.tutorialMode || this.tutorial?.phase === 'standard_game')) void this.networkManager.updateUser({ settings: { ...user.settings, snakeAppearance: this.appearance } })
         .catch((error) => console.warn('[Game] Could not save snake appearance', error));
     }, 150);
   }
@@ -200,7 +200,7 @@ export class Game {
     this.appearance = normalizeSnakeAppearance(savedAppearance);
     // Initialize Player Name (Persistent)
     this.playerName =
-      localStorage.getItem('snake3d_player_name') || `Player${Math.floor(Math.random() * 10000)}`;
+      localStorage.getItem('snake3d_player_name') || localStorage.getItem('snake3d_username') || `Player${Math.floor(Math.random() * 10000)}`;
     localStorage.setItem('snake3d_player_name', this.playerName);
 
     // 1. Managers Setup
@@ -329,7 +329,7 @@ export class Game {
         localStorage.setItem('snake3d_player_name', this.playerName);
         this.leaderboardUI.setPlayerName(this.playerName);
       }
-      if (result.user?.settings?.snakeAppearance) {
+      if (!this.tutorialMode && result.user?.settings?.snakeAppearance) {
         this.appearance = normalizeSnakeAppearance(result.user.settings.snakeAppearance);
         localStorage.setItem('snake3d_appearance', JSON.stringify(this.appearance));
         this.pauseUI.setAppearance(this.appearance);
@@ -420,8 +420,10 @@ export class Game {
       this.tutorialUI.showIntroduction(this.appearance, (appearance) => this.changeAppearance(appearance),
         () => { void this.startTutorial(); },
         () => {
-          localStorage.setItem('snake3d_onboarding_completed', '1');
-          window.location.reload();
+          void this.finishTutorialAccount().finally(() => {
+            localStorage.setItem('snake3d_onboarding_completed', '1');
+            window.location.reload();
+          });
         });
     } else {
       // Welcome Screen - показываем приветственный экран
@@ -435,8 +437,7 @@ export class Game {
     const user = this.networkManager.getUser();
     // Check for stored name fallback
     const storedName = localStorage.getItem('snake3d_username');
-    this.playerName =
-      user?.username || storedName || `Player ${Math.floor(Math.random() * 9000) + 1000}`;
+    this.playerName = user?.username || localStorage.getItem('snake3d_player_name') || storedName || this.playerName;
   }
 
   private setupInputs() {
@@ -783,6 +784,7 @@ export class Game {
     this.snake.roll(action === 'left' ? -Math.PI / 2 : Math.PI / 2);
     this.tutorial.acceptRoll();
     localStorage.setItem('snake3d_onboarding_completed', '1');
+    void this.finishTutorialAccount();
     this.tutorial.completeExpansion();
     this.currentSPM = 300;
     this.snake.setSpeed(60 / this.currentSPM);
@@ -793,6 +795,15 @@ export class Game {
     this.world.respawnFood(this.snake.segments);
     this.hud.togglePauseButton(true);
     return true;
+  }
+
+  private async finishTutorialAccount(): Promise<void> {
+    try {
+      const user = this.networkManager.getUser() ?? (await this.networkManager.connect()).user;
+      await this.networkManager.updateUser({ settings: { ...user.settings, snakeAppearance: this.appearance } });
+    } catch (error) {
+      console.warn('[Tutorial] Could not save account appearance:', error);
+    }
   }
 
   private showSpectatorBanner(): void {
