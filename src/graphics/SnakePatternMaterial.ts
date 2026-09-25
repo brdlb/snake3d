@@ -3,6 +3,7 @@ import type { SnakeAppearance } from '../../shared/appearance';
 import { snakePatternBits } from '../../shared/appearance';
 
 const vertexShader = `
+  attribute vec3 instanceColor;
   attribute vec3 instancePatternColor;
   attribute float instancePatternBits;
   varying vec2 patternUv;
