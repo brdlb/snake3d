@@ -268,7 +268,6 @@ export class PauseUI {
                 z-index: 2000;
                 pointer-events: none;
                 background: rgba(0, 0, 0, 0.4);
-                backdrop-filter: blur(5px);
                 opacity: 0;
                 transition: opacity 0.3s ease;
                 display: flex;
