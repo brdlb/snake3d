@@ -15,6 +15,7 @@ import { getRenderableSegmentIndices } from '../graphics/SnakeRendering';
 import { SettingsUI } from '../ui/SettingsUI';
 import { GameOverUI } from '../ui/GameOverUI';
 import { GameHUD } from '../ui/GameHUD';
+import { MiniMap } from '../ui/MiniMap';
 import { WelcomeScreen } from '../ui/WelcomeScreen';
 import { LeaderboardUI } from '../ui/LeaderboardUI';
 import { SoundManager } from '../audio/SoundManager';
@@ -63,6 +64,7 @@ export class Game {
   private gameOverUI: GameOverUI;
   private pauseUI: PauseUI;
   private hud: GameHUD;
+  private miniMap: MiniMap;
   private welcomeScreen: WelcomeScreen | null = null;
   private leaderboardUI: LeaderboardUI;
   private soundManager!: SoundManager;
@@ -253,6 +255,8 @@ export class Game {
       () => this.leaderboardUI.show(),
     );
     this.hud = new GameHUD();
+    this.miniMap = new MiniMap();
+    this.miniMap.setVisible(false);
 
     this.pauseUI = new PauseUI(
       () => this.togglePause(),
@@ -1254,6 +1258,7 @@ export class Game {
     this.leaderboardUI.dispose();
     this.pauseUI.dispose();
     this.hud.dispose();
+    this.miniMap.dispose();
     if (this.welcomeScreen) this.welcomeScreen.dispose();
     this.spectatorBanner?.remove();
 
@@ -2010,6 +2015,7 @@ export class Game {
     this.gameOverUI.show();
     this.hud.togglePauseButton(false);
     this.hud.setVisibility(false);
+    this.miniMap.setVisible(false);
 
     if (this.tutorialMode && !this.tutorialConnectionStarted) {
       this.tutorialConnectionStarted = true;
@@ -2282,6 +2288,37 @@ export class Game {
       markSnakePatternsUpdated(this.phantomMesh);
     }
 
+    const spectatorTargets = this.isSpectating && this.spectatorCameraMode === 'follow'
+      ? this.getSpectatorTargets()
+      : [];
+    const spectatorTarget = spectatorTargets.length
+      ? spectatorTargets[this.spectatorTargetIndex % spectatorTargets.length]
+      : null;
+    const mapHead = this.isSpectating ? spectatorTarget?.head : this.snake.getHead();
+    const mapDirection = this.isSpectating ? spectatorTarget?.direction : this.snake.direction;
+    const showMap = !this.isWaitingForStart && !this.isGameOver && !!mapHead && !!mapDirection;
+    this.miniMap.setVisible(showMap);
+    if (showMap && mapHead && mapDirection) {
+      this.miniMap.draw(
+        this.sceneManager.camera,
+        mapHead,
+        mapDirection,
+        this.world.size,
+        this.world.foodPositions,
+        this.world.foodColors,
+        [
+          ...(!this.isSpectating ? [{ segments: this.snake.segments, color: '#ffffff' }] : []),
+          ...this.phantoms.filter((phantom) => !phantom.isDeadNow()).map((phantom) => ({
+            segments: phantom.segments,
+            color: phantom.getColorHex(),
+          })),
+          ...this.liveOpponents.filter((opponent) => opponent.alive).map((opponent) => ({
+            segments: opponent.segments,
+            color: opponent.color,
+          })),
+        ],
+      );
+    }
     this.postProcess.render();
   }
 }

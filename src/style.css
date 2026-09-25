@@ -315,6 +315,26 @@ body {
 }
 
 /* HUD Panel */
+.mini-map {
+  position: fixed;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  left: calc(20px + env(safe-area-inset-left));
+  width: 204px;
+  height: 204px;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+@media (max-width: 600px) {
+  .mini-map {
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    left: calc(10px + env(safe-area-inset-left));
+    width: 150px;
+    height: 150px;
+  }
+}
+
 .hud-panel {
   position: absolute;
   top: 20px;
