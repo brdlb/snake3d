@@ -952,7 +952,7 @@ body {
   transition: opacity .2s ease, visibility .2s ease;
 }
 .tutorial-overlay.active { opacity: 1; visibility: visible; pointer-events: auto; }
-.tutorial-overlay.introduction .tutorial-card { transform: translateY(-44vh); }
+.tutorial-overlay.introduction .tutorial-card { transform: translateY(-25vh); }
 .tutorial-card { width: min(92vw, 520px); padding: 28px; color: #e9f4ff; background: #000; border: none; text-align: center; box-shadow: none; }
 .tutorial-card p { margin: 0 auto 14px; font: 18px/1.45 'Jura', sans-serif; }
 .tutorial-hint { min-height: 22px; margin-bottom: 20px; color: #8b98a7; font-size: 13px; }
