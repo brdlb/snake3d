@@ -55,6 +55,17 @@ export class CameraController {
         this.orbitTime = 0;
     }
 
+    public snapToTarget(targetPos: THREE.Vector3, targetDir: THREE.Quaternion) {
+        this.isOrbiting = false;
+        this.isManualActive = false;
+        this.manualYaw = 0;
+        this.manualPitch = 0;
+        this.cameraRig.position.copy(targetPos);
+        this.smoothedRigQuaternion.copy(targetDir);
+        this.cameraRig.quaternion.copy(targetDir);
+        this.updateCameraFromRig(0);
+    }
+
     public update(delta: number, targetPos: THREE.Vector3, targetDir: THREE.Quaternion, progress: number) {
         if (this.isOrbiting) {
             this.updateOrbit(delta);

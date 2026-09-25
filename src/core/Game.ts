@@ -282,9 +282,9 @@ export class Game {
     this.dummy = new THREE.Object3D();
     this._color = new THREE.Color();
 
-    // A returning player gets the field as part of entry; a new player gets it
-    // from startTutorial(), after explicitly choosing to begin onboarding.
-    if (!this.tutorialMode) this.initializePlayfield();
+    // The tutorial shows the snake behind its introduction; regular entry also
+    // needs the playfield before joining a room.
+    this.initializePlayfield();
 
     // Network Manager
     this.networkManager = NetworkManager.getInstance();
@@ -408,10 +408,21 @@ export class Game {
     this.loop.start();
 
     if (this.tutorialMode) {
+      const spawn = this.tutorialSpawn();
+      this.snake.reset(spawn, new THREE.Quaternion());
+      this.cameraController.snapToTarget(this.snake.getHead(), this.snake.direction);
+      this.cameraController.setOrbitMode();
+      if (this.tutorialPlane) {
+        this.tutorialPlane.visible = true;
+        this.tutorialPlane.position.copy(spawn).add(new THREE.Vector3(0, -0.5, 0));
+      }
       this.tutorialUI = new TutorialUI();
-      this.tutorialUI.show('Start the tutorial to learn growth, acceleration, deceleration, and rolling.', 'Click the button — sound will start after your first action.', () => {
-        void this.startTutorial();
-      });
+      this.tutorialUI.showIntroduction(this.appearance, (appearance) => this.changeAppearance(appearance),
+        () => { void this.startTutorial(); },
+        () => {
+          localStorage.setItem('snake3d_onboarding_completed', '1');
+          window.location.reload();
+        });
     } else {
       // Welcome Screen - показываем приветственный экран
       this.welcomeScreen = new WelcomeScreen((mode, roomSeed) => this.handleGameStart(mode, roomSeed));
@@ -599,6 +610,7 @@ export class Game {
 
     // Сбрасываем змейку на выбранную точку спауна
     this.snake.reset(spawnPosition, spawnDirection);
+    this.cameraController.snapToTarget(this.snake.getHead(), this.snake.direction);
 
     // Phantoms are fully client-side replay entities. Their recorded input
     // controls turns, while their food effects are calculated locally.
@@ -710,14 +722,13 @@ export class Game {
 
   private async startTutorial(): Promise<void> {
     if (!this.tutorialMode || this.tutorial) return;
-    this.initializePlayfield();
     await this.soundManager.initAudio();
     const direction = new THREE.Vector3(0, 0, -1);
     const up = new THREE.Vector3(0, 1, 0);
-    const spawn = new THREE.Vector3(Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2))
-      .addScaledVector(direction, -5);
+    const spawn = this.tutorialSpawn();
     this.tutorial = new TutorialSession(spawn, direction, up);
     this.snake.reset(spawn, new THREE.Quaternion());
+    this.cameraController.snapToTarget(this.snake.getHead(), this.snake.direction);
     this.currentSPM = 150;
     this.snake.setSpeed(60 / this.currentSPM);
     this.world.setSeed(1337);
@@ -736,6 +747,10 @@ export class Game {
     this.tutorialUI?.hide();
     this.cameraController.stopOrbitMode();
     this.hud.togglePauseButton(false);
+  }
+
+  private tutorialSpawn(): THREE.Vector3 {
+    return new THREE.Vector3(Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2), Math.floor(WORLD_SIZE / 2) + 5);
   }
 
   private setTutorialFood(index: number): void {

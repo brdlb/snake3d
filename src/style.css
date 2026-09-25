@@ -953,11 +953,17 @@ body {
 }
 .tutorial-overlay.active { opacity: 1; visibility: visible; pointer-events: auto; }
 .tutorial-card { width: min(92vw, 520px); padding: 28px; color: #e9f4ff; background: #000; border: none; text-align: center; box-shadow: none; }
-.tutorial-card h2 { margin: 0 0 16px; color: #00c7ef; font: 700 24px 'Jura', sans-serif; letter-spacing: 4px; }
 .tutorial-card p { margin: 0 auto 14px; font: 18px/1.45 'Jura', sans-serif; }
 .tutorial-hint { min-height: 22px; margin-bottom: 20px; color: #8b98a7; font-size: 13px; }
 .tutorial-card button { padding: 12px 24px; color: #fff; background: rgba(0, 199, 239, .14); border: 1px solid #00c7ef; font: 700 13px 'Jura', sans-serif; letter-spacing: 2px; cursor: pointer; }
 .tutorial-card button:hover { background: rgba(0, 199, 239, .28); }
+.tutorial-editor { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; margin: 18px 0; }
+.tutorial-editor[hidden], .tutorial-card button[hidden] { display: none; }
+.tutorial-editor canvas { width: 112px; height: 112px; image-rendering: pixelated; }
+.tutorial-editor label { display: flex; align-items: center; gap: 6px; font: 13px 'Jura', sans-serif; }
+.tutorial-editor input[type='number'] { width: 92px; }
+.tutorial-card .tutorial-skip { display: block; margin: 12px auto 0; background: transparent; border-color: #677482; color: #aab7c5; }
+.tutorial-card .tutorial-skip[hidden] { display: none; }
 
 .welcome-room-invitation {
   margin: 0 0 24px;
