@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 const MAP_SIZE = 204;
 const PADDING = 12;
+const MAP_ZOOM = 1.5;
 
 export class MiniMap {
   private readonly canvas: HTMLCanvasElement;
@@ -59,10 +60,10 @@ export class MiniMap {
     }
     this.right.normalize();
     this.top.crossVectors(this.normal, this.right).normalize();
-    this.center.set(size / 2, size / 2, size / 2);
+    this.center.copy(head);
 
-    // A rotating square needs diagonal clearance to keep every world edge visible.
-    const scale = (MAP_SIZE - PADDING * 2) / ((size + 1) * Math.SQRT2);
+    // Keep the head at the center and show the nearby field at 1.5x zoom.
+    const scale = ((MAP_SIZE - PADDING * 2) / ((size + 1) * Math.SQRT2)) * MAP_ZOOM;
     const project = (position: THREE.Vector3): [number, number] => {
       this.relative.copy(position).sub(this.center);
       return [MAP_SIZE / 2 + this.relative.dot(this.right) * scale,
