@@ -14,6 +14,7 @@ export function createRandomSnakeAppearance(): SnakeAppearance {
   return {
     ...DEFAULT_SNAKE_APPEARANCE,
     patternSeed: crypto.getRandomValues(new Uint32Array(1))[0],
+    ...randomizeSnakeColors(),
   };
 }
 
