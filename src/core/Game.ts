@@ -1799,6 +1799,7 @@ export class Game {
           this.currentSPM = Math.max(60, this.currentSPM - 10);
         }
         this.particleSystem.emit(head, this.snake.direction, 30, eatenColor);
+        this.soundManager.playPick();
         this.world.foodPositions = [];
         this.world.foodColors = [];
         this.world.foodSounds = [];
