@@ -1673,7 +1673,7 @@ export class Game {
     this.cameraController.update(delta, head, this.snake.direction, this.snake.getStepProgress());
 
     // Update Audio
-    this.soundManager.update(head);
+    this.soundManager.update();
 
     // Update Particles
     this.particleSystem.update(delta);

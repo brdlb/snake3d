@@ -247,19 +247,19 @@ export class SoundManager {
         }
     }
 
-    public update(headPos: THREE.Vector3) {
+    public update() {
         // Don't process if audio not initialized yet
         if (!this.isInitialized) return;
 
         // Validation: Ensure buffers are loaded
         if (this.humBuffers.length < 3 || !this.humBuffers[0]) return;
 
-        // 1. Calculate distances to all food
-        // We only care about active food.
+        // 1. Calculate distances from the listener to all active food.
+        const listenerPosition = this.sceneManager.camera.position;
         const foodDistances = this.world.foodPositions.map((pos, index) => {
             return {
                 index: index,
-                distance: pos.distanceToSquared(headPos)
+                distance: pos.distanceToSquared(listenerPosition)
             };
         });
 
@@ -285,8 +285,8 @@ export class SoundManager {
             // Check if already playing
             const existing = this.humPool.find(p => p.foodIndex === closest.index);
             if (existing) {
-                // Already playing, just update position if needed (though position is static for food)
-                // But we should update settings like refDistance if they changed
+                // Food can respawn at a new position while keeping the same index.
+                existing.mesh.position.copy(this.world.foodPositions[closest.index]);
                 existing.source.setRefDistance(this.settings.audioConfig.foodSoundRadius);
                 existing.source.setVolume(this.settings.audioConfig.volume);
                 continue;
