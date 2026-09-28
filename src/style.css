@@ -1146,7 +1146,7 @@ button, input { font-family: inherit; }
 
 :root body .pause-screen, :root body .game-over-screen { box-sizing: border-box; align-items: flex-start; justify-content: center; gap: 0; padding: clamp(18px, 4vw, 50px); overflow-y: auto; }
 :root body .pause-screen { background: transparent; backdrop-filter: none; }
-:root body .pause-content { box-sizing: border-box; display: flex; flex-direction: column; align-items: flex-start; width: min(100%, 740px); max-height: 100%; overflow-y: auto; padding: clamp(18px, 3vw, 32px); border: 1px solid #74797c; background: rgba(2, 3, 4, .82); backdrop-filter: blur(5px); pointer-events: auto; }
+:root body .pause-content { box-sizing: border-box; display: flex; flex-direction: column; align-items: flex-start; width: min(100%, 740px); max-height: 100%; overflow-y: auto; padding: clamp(18px, 3vw, 32px); border: 1px solid #74797c; background: rgba(2, 3, 4, .82); backdrop-filter: blur(5px); }
 :root body .pause-content::before, :root body .game-over-screen::before { content: '03 — PAUSE MENU'; display: block; width: 100%; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #898989; font: 11px 'Consolas', monospace; letter-spacing: .12em; }
 :root body .game-over-screen::before { content: '04 — GAME OVER'; }
 :root body .pause-panel, :root body .game-over-panel, :root body .restart-btn { box-sizing: border-box; color: #eee; background: transparent; border: 0; transform: none; font-family: 'Consolas', monospace; }
@@ -1264,6 +1264,10 @@ button, input { font-family: inherit; }
 :root body .frame-cross-br {
   position: relative;
   border: 1px solid rgba(255, 255, 255, .32) !important;
+}
+
+:root body .hud-panel {
+  position: fixed;
 }
 
 :root body .frame-cross-tl::after,
