@@ -17,7 +17,7 @@ export class MiniMap {
 
   constructor() {
     this.canvas = document.createElement('canvas');
-    this.canvas.className = 'mini-map';
+    this.canvas.className = 'mini-map frame-ghost';
     this.canvas.width = MAP_SIZE * 2;
     this.canvas.height = MAP_SIZE * 2;
     this.canvas.setAttribute('aria-label', 'Map of the current level');

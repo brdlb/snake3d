@@ -1204,134 +1204,96 @@ button, input { font-family: inherit; }
   :root body .col-seed, :root body .col-date { width: 56px; }
 }
 
-/* Instrument details: full lines, ghost lines, corner brackets, and fiducial crosses. */
-:root body .welcome-content,
-:root body .leaderboard-content,
-:root body .settings-panel {
+/* Five reusable frame variants. Each element receives exactly one. */
+:root body .frame-ghost {
+  border: 1px solid rgba(255, 255, 255, .32) !important;
+}
+
+:root body .frame-corners {
   position: relative;
-  border-color: rgba(255, 255, 255, .24);
-  background-image:
-    linear-gradient(#e8e8e8, #e8e8e8), linear-gradient(#e8e8e8, #e8e8e8),
-    linear-gradient(#e8e8e8, #e8e8e8), linear-gradient(#e8e8e8, #e8e8e8),
-    linear-gradient(#e8e8e8, #e8e8e8), linear-gradient(#e8e8e8, #e8e8e8),
-    linear-gradient(#e8e8e8, #e8e8e8), linear-gradient(#e8e8e8, #e8e8e8);
-  background-size: 16px 1px, 1px 16px, 16px 1px, 1px 16px,
-    16px 1px, 1px 16px, 16px 1px, 1px 16px;
-  background-position: left top, left top, right top, right top,
-    left bottom, left bottom, right bottom, right bottom;
-  background-repeat: no-repeat;
+  border: 1px solid rgba(255, 255, 255, .32) !important;
 }
 
-:root body .welcome-content {
-  background-image:
-    linear-gradient(#e8e8e8, #e8e8e8), linear-gradient(#e8e8e8, #e8e8e8),
-    linear-gradient(#e8e8e8, #e8e8e8), linear-gradient(#e8e8e8, #e8e8e8),
-    linear-gradient(#e8e8e8, #e8e8e8), linear-gradient(#e8e8e8, #e8e8e8),
-    linear-gradient(#e8e8e8, #e8e8e8), linear-gradient(#e8e8e8, #e8e8e8),
-    linear-gradient(90deg, rgba(0,0,0,.98) 0 48%, rgba(0,0,0,.69) 100%),
-    repeating-linear-gradient(0deg, transparent 0 38px, #273036 39px 40px),
-    repeating-linear-gradient(90deg, transparent 0 38px, #273036 39px 40px);
-  background-size: 16px 1px, 1px 16px, 16px 1px, 1px 16px,
-    16px 1px, 1px 16px, 16px 1px, 1px 16px, auto, auto, auto;
-  background-position: left top, left top, right top, right top,
-    left bottom, left bottom, right bottom, right bottom, center, center, center;
-}
-
-:root body .welcome-content::before,
-:root body .leaderboard-content::before,
-:root body .settings-panel::before {
-  content: '+';
+:root body .frame-corners::after,
+:root body .pause-screen .resume-btn.frame-corners::after {
+  content: '';
   position: absolute;
-  top: 30px;
-  right: -7px;
-  color: #eee;
-  font: 17px/1 'Consolas', monospace;
+  inset: -1px;
   pointer-events: none;
+  background:
+    linear-gradient(#fff, #fff) left top / 16px 2px no-repeat,
+    linear-gradient(#fff, #fff) left top / 2px 16px no-repeat,
+    linear-gradient(#fff, #fff) right top / 16px 2px no-repeat,
+    linear-gradient(#fff, #fff) right top / 2px 16px no-repeat,
+    linear-gradient(#fff, #fff) left bottom / 16px 2px no-repeat,
+    linear-gradient(#fff, #fff) left bottom / 2px 16px no-repeat,
+    linear-gradient(#fff, #fff) right bottom / 16px 2px no-repeat,
+    linear-gradient(#fff, #fff) right bottom / 2px 16px no-repeat;
 }
 
-:root body .welcome-content::after,
-:root body .leaderboard-content::after,
-:root body .settings-panel::after {
-  content: '+';
+:root body .frame-bold {
+  position: relative;
+  border: 2px solid #dedede !important;
+}
+
+:root body .frame-bold::after {
+  content: '';
   position: absolute;
-  bottom: 24px;
-  left: -7px;
-  color: #aaa;
-  font: 17px/1 'Consolas', monospace;
+  inset: -2px;
   pointer-events: none;
+  background:
+    linear-gradient(#fff, #fff) left top / 22px 5px no-repeat,
+    linear-gradient(#fff, #fff) left top / 5px 22px no-repeat,
+    linear-gradient(#fff, #fff) right top / 22px 5px no-repeat,
+    linear-gradient(#fff, #fff) right top / 5px 22px no-repeat,
+    linear-gradient(#fff, #fff) left bottom / 22px 5px no-repeat,
+    linear-gradient(#fff, #fff) left bottom / 5px 22px no-repeat,
+    linear-gradient(#fff, #fff) right bottom / 22px 5px no-repeat,
+    linear-gradient(#fff, #fff) right bottom / 5px 22px no-repeat;
 }
 
-:root body .leaderboard-content { border-top-color: #bdbdbd; border-bottom-color: #bdbdbd; }
-:root body .settings-panel { border-left-color: rgba(255,255,255,.11); border-right-color: rgba(255,255,255,.11); }
-:root body .rooms-list { border-color: rgba(255,255,255,.32); border-left-color: rgba(255,255,255,.12); border-right-color: rgba(255,255,255,.12); }
+:root body .frame-cross-tl,
+:root body .frame-cross-br {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, .32) !important;
+}
+
+:root body .frame-cross-tl::after,
+:root body .frame-cross-br::after,
+:root body .game-over-screen .leaders-btn.frame-cross-br::after {
+  content: '';
+  position: absolute;
+  width: 21px;
+  height: 21px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  background:
+    linear-gradient(#fff, #fff) center / 21px 1px no-repeat,
+    linear-gradient(#fff, #fff) center / 1px 21px no-repeat;
+}
+
+:root body .frame-cross-tl::after {
+  top: -1px;
+  left: -1px;
+}
+
+:root body .frame-cross-br::after,
+:root body .game-over-screen .leaders-btn.frame-cross-br::after {
+  top: calc(100% + 1px);
+  left: calc(100% + 1px);
+}
+
 :root body .room-row { border-bottom-color: rgba(255,255,255,.14); }
 :root body .room-row:nth-child(even) { background: rgba(255,255,255,.035); }
-:root body .room-row:focus-within { border-bottom-color: #fff; }
-
-:root body .room-create,
-:root body .pause-screen .resume-btn,
-:root body .game-over-screen .leaders-btn,
-:root body .settings-panel .settings-action-btn {
-  position: relative;
-  border-color: rgba(255,255,255,.28);
-  background-image:
-    linear-gradient(#fff, #fff), linear-gradient(#fff, #fff),
-    linear-gradient(#fff, #fff), linear-gradient(#fff, #fff),
-    linear-gradient(#fff, #fff), linear-gradient(#fff, #fff),
-    linear-gradient(#fff, #fff), linear-gradient(#fff, #fff);
-  background-size: 9px 1px, 1px 9px, 9px 1px, 1px 9px,
-    9px 1px, 1px 9px, 9px 1px, 1px 9px;
-  background-position: left top, left top, right top, right top,
-    left bottom, left bottom, right bottom, right bottom;
-  background-repeat: no-repeat;
-}
-
-:root body .pause-screen .resume-btn::after,
-:root body .game-over-screen .leaders-btn::after {
-  content: '+';
-  position: absolute;
-  right: -6px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #fff;
-  font: 14px/1 'Consolas', monospace;
-  pointer-events: none;
-}
-
 :root body .pause-screen .menu-btn:not(.resume-btn),
 :root body .game-over-screen .restart-btn:not(.leaders-btn) {
   border-bottom-color: rgba(255,255,255,.12);
 }
-
-:root body .hud-panel {
-  border-color: rgba(255,255,255,.26);
-  border-left-color: rgba(255,255,255,.8);
-  border-top-color: rgba(255,255,255,.8);
-  background-image:
-    linear-gradient(#fff, #fff), linear-gradient(#fff, #fff),
-    linear-gradient(#fff, #fff), linear-gradient(#fff, #fff);
-  background-size: 12px 1px, 1px 12px, 12px 1px, 1px 12px;
-  background-position: right top, right top, left bottom, left bottom;
-  background-repeat: no-repeat;
-}
-
-:root body .hud-panel::after {
-  content: '+';
-  position: absolute;
-  right: -6px;
-  bottom: 15px;
-  color: #fff;
-  font: 14px/1 'Consolas', monospace;
-}
-
-:root body .mini-map { border-color: rgba(255,255,255,.35); outline: 1px solid rgba(255,255,255,.7); outline-offset: -7px; }
-:root body .hud-pause-btn { border-color: rgba(255,255,255,.45); border-top-color: #fff; border-left-color: #fff; }
-:root body .pause-screen .stats-panel, :root body .pause-screen .appearance-panel { border-top-color: rgba(255,255,255,.32); }
+:root body .pause-screen .stats-panel,
+:root body .pause-screen .appearance-panel { border-top-color: rgba(255,255,255,.32); }
 :root body .game-over-screen .stats-panel { border-top-color: rgba(255,255,255,.8); border-bottom-color: rgba(255,255,255,.25); }
 :root body .leaderboard-row.header { border-bottom-color: #bdbdbd; }
 :root body .leaderboard-row:not(.header) { border-bottom-color: rgba(255,255,255,.11); }
-:root body .settings-section-title { border-bottom-color: rgba(255,255,255,.3); }
-
 /* All visible UI copy, including data loaded at runtime, uses capitals. */
 body, body * {
   text-transform: uppercase !important;

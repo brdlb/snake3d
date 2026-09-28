@@ -190,7 +190,7 @@ export class PauseUI {
 
         // 4. Resume Panel (Button)
         this.resumeBtn = document.createElement('button');
-        this.resumeBtn.className = 'pause-panel menu-btn resume-btn';
+        this.resumeBtn.className = 'pause-panel menu-btn resume-btn frame-corners';
         this.resumeBtn.textContent = 'RESUME';
         this.resumeBtn.onclick = () => this.onResume();
 

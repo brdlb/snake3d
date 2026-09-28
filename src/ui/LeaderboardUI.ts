@@ -30,7 +30,7 @@ export class LeaderboardUI {
         this.container.appendChild(this.backdrop);
 
         this.content = document.createElement('div');
-        this.content.className = 'leaderboard-content';
+        this.content.className = 'leaderboard-content frame-cross-br';
         this.container.appendChild(this.content);
 
         // Header

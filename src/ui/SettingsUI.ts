@@ -29,7 +29,7 @@ export class SettingsUI {
         document.body.appendChild(this.overlay);
 
         this.panel = document.createElement('div');
-        this.panel.className = 'settings-panel';
+        this.panel.className = 'settings-panel frame-bold';
         this.overlay.appendChild(this.panel);
 
         // Header with Title and Close Button
@@ -363,7 +363,7 @@ export class SettingsUI {
         createSection('Tutorial');
         const restartTutorialButton = document.createElement('button');
         restartTutorialButton.type = 'button';
-        restartTutorialButton.className = 'settings-action-btn';
+        restartTutorialButton.className = 'settings-action-btn frame-ghost';
         restartTutorialButton.innerText = 'RESTART TUTORIAL';
         restartTutorialButton.addEventListener('click', () => this.onTutorialRestart());
         this.panel.appendChild(restartTutorialButton);

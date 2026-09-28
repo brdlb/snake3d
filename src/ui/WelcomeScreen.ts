@@ -31,7 +31,7 @@ export class WelcomeScreen {
 
         // Content wrapper
         const content = document.createElement('div');
-        content.className = 'welcome-content';
+        content.className = 'welcome-content frame-corners';
 
         const eyebrow = document.createElement('div');
         eyebrow.className = 'screen-eyebrow';
@@ -88,7 +88,7 @@ export class WelcomeScreen {
         roomsSection.innerHTML = `
             <div class="rooms-heading">
                 <h2 class="rooms-title">SELECT ROOM</h2>
-                <button type="button" class="room-create">+ NEW ROOM</button>
+                <button type="button" class="room-create frame-ghost">+ NEW ROOM</button>
             </div>
             <div class="rooms-columns" aria-hidden="true">
                 <span>ROOM</span>

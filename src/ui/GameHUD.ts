@@ -21,7 +21,7 @@ export class GameHUD {
 
     private createUI() {
         this.container = document.createElement('div');
-        this.container.className = 'hud-panel';
+        this.container.className = 'hud-panel frame-cross-tl';
 
         this.playersContainer = document.createElement('div');
         this.playersContainer.className = 'hud-players';
