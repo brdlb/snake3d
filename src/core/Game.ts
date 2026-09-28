@@ -172,7 +172,6 @@ export class Game {
   private tutorial: TutorialSession | null = null;
   private tutorialUI: TutorialUI | null = null;
   private tutorialBlocked = false;
-  private tutorialFoodNotice: 'extension_intro' | 'acceleration_intro' | 'slowdown_intro' | null = null;
   private tutorialConnectionStarted = false;
 
   private logAction(action: string, data: unknown): void {
@@ -682,8 +681,9 @@ export class Game {
     mode: 'player' | 'spectator' = 'player',
     selectedRoomSeed?: number,
   ): Promise<void> {
-    if (mode === 'player' && this.initialSpectatorPromise && this.selectedRoomSeed === null) {
+    if (mode === 'player' && this.initialSpectatorPromise) {
       await this.initialSpectatorPromise.catch(() => undefined);
+      this.initialSpectatorPromise = null;
     }
     // Инициализируем AudioContext по клику пользователя
     if (mode === 'player') await this.soundManager.initAudio();
@@ -717,6 +717,8 @@ export class Game {
 
     // Снимаем флаг ожидания старта
     this.isWaitingForStart = false;
+    this.hud.setVisibility(true);
+    this.hud.togglePauseButton(!this.isSpectating);
     if (this.isSpectating) {
       this.spectatorCameraMode = 'free';
       this.spectatorTargetIndex = 0;
@@ -734,6 +736,10 @@ export class Game {
   private async startTutorial(): Promise<void> {
     if (!this.tutorialMode || this.tutorial) return;
     await this.soundManager.initAudio();
+    this.resetTutorial();
+  }
+
+  private resetTutorial(): void {
     const direction = new THREE.Vector3(0, 0, -1);
     const up = new THREE.Vector3(0, 1, 0);
     const spawn = this.tutorialSpawn();
@@ -749,7 +755,6 @@ export class Game {
     this.isSpectating = false;
     this.isWaitingForStart = false;
     this.tutorialBlocked = false;
-    this.tutorialFoodNotice = null;
     if (this.tutorialPlane) {
       this.tutorialPlane.visible = true;
       this.tutorialPlane.position.copy(spawn).addScaledVector(up, -0.5);
@@ -1417,6 +1422,7 @@ export class Game {
         }
       }
       this.particleSystem.update(delta);
+      this.updatePlayerHud();
       return;
     }
 
@@ -1474,7 +1480,6 @@ export class Game {
     this.advanceLiveOpponents(delta);
     if (this.liveWorld) this.checkLivePhantomCollisions();
     const preStepHead = this.snake.getHead().clone();
-    if (this.showUpcomingTutorialFood(preStepHead)) return;
     if (this.snake.update(delta)) {
       this.playerTick++;
       // Step occurred - check if we need to record a direction change
@@ -1637,6 +1642,10 @@ export class Game {
     // Update Particles
     this.particleSystem.update(delta);
 
+    this.updatePlayerHud();
+  }
+
+  private updatePlayerHud(): void {
     // Update HUD with all players info
     const currentLength = this.snake.segments.length;
     const speed = this.snake.getStepsPerMinute();
@@ -1687,36 +1696,14 @@ export class Game {
     this.hud.updatePlayers(players);
   }
 
-  private showUpcomingTutorialFood(head: THREE.Vector3): boolean {
-    const phase = this.tutorial?.phase;
-    if (phase !== 'extension_intro' && phase !== 'acceleration_intro' && phase !== 'slowdown_intro') return false;
-    if (this.tutorialFoodNotice === phase || this.world.foodPositions.length !== 1) return false;
-
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.snake.direction);
-    if (Math.abs(forward.x) > 0.5) forward.set(Math.sign(forward.x), 0, 0);
-    else if (Math.abs(forward.y) > 0.5) forward.set(0, Math.sign(forward.y), 0);
-    else forward.set(0, 0, Math.sign(forward.z));
-    if (head.clone().add(forward).distanceToSquared(this.world.foodPositions[0]) >= 0.1) return false;
-
-    this.tutorialFoodNotice = phase;
-    this.tutorialBlocked = true;
-    this.cameraController.setOrbitMode(head);
-    const message = phase === 'extension_intro'
-      ? 'The blue cube makes your snake grow.'
-      : phase === 'acceleration_intro'
-        ? 'The green cube speeds you up.'
-        : 'The pink cube slows your snake down.';
-    this.tutorialUI?.show(message, 'Click CONTINUE to collect it.', () => {
-      this.tutorialBlocked = false;
-      this.tutorialUI?.hide();
-      this.cameraController.stopOrbitMode();
-    });
-    return true;
-  }
-
   private checkCollisions() {
     const head = this.snake.getHead();
     const snakeColor = new THREE.Color(0xffffff);
+
+    if (this.tutorialMode && (this.world.isOutOfBounds(head) || this.world.checkSelfCollision(this.snake.segments))) {
+      this.resetTutorial();
+      return;
+    }
 
     if (this.world.isOutOfBounds(head)) {
       console.log('Game Over: Bounds');
