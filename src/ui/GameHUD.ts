@@ -1,3 +1,5 @@
+import { generateSnakePattern, type SnakeAppearance } from '../../shared/appearance';
+
 /**
  * Информация об игроке для отображения в HUD
  */
@@ -8,6 +10,8 @@ export interface PlayerInfo {
     speed: number;
     isPlayer?: boolean; // true для текущего игрока
     color?: string;     // цвет игрока (hex)
+    appearance?: SnakeAppearance;
+    isPhantom?: boolean;
     isDead?: boolean;   // жив или мертв
 }
 
@@ -47,35 +51,43 @@ export class GameHUD {
                 row.classList.add('hud-player-dead');
             }
 
-            // Header: Color + Name
+            const preview = document.createElement('canvas');
+            preview.className = 'hud-player-pattern';
+            preview.width = 70;
+            preview.height = 70;
+            preview.setAttribute('aria-hidden', 'true');
+            if (player.appearance) {
+                const context = preview.getContext('2d');
+                if (context) {
+                    const pattern = generateSnakePattern(player.appearance.patternSeed);
+                    const cell = preview.width / pattern.length;
+                    pattern.forEach((patternRow, y) => patternRow.forEach((filled, x) => {
+                        context.fillStyle = filled ? player.appearance!.patternColor : player.appearance!.backgroundColor;
+                        context.fillRect(x * cell, y * cell, cell, cell);
+                    }));
+                }
+            }
+            row.appendChild(preview);
+
+            const details = document.createElement('div');
+            details.className = 'hud-player-details';
+
+            // Header: status + name
             const header = document.createElement('div');
             header.className = 'hud-player-header';
 
-            const colorDot = document.createElement('span');
-            colorDot.className = 'hud-player-color';
+            const statusDot = document.createElement('span');
+            statusDot.className = 'hud-player-status';
 
-            if (player.isDead) {
-                // Show 'X' for dead players
-                colorDot.textContent = '✕'; // Cross character
-                colorDot.style.color = '#ff0000'; // Red color for cross
-                colorDot.style.backgroundColor = 'transparent';
-                colorDot.style.boxShadow = 'none';
-                colorDot.style.fontSize = '14px';
-                colorDot.style.lineHeight = '12px';
-                colorDot.style.textAlign = 'center';
-                colorDot.style.fontWeight = 'bold';
-            } else {
-                colorDot.style.backgroundColor = player.color || '#ffffff';
-                colorDot.style.boxShadow = `0 0 5px ${player.color || '#ffffff'}`;
-            }
+            statusDot.classList.add(player.isPhantom ? 'hud-player-status-phantom' : 'hud-player-status-online');
 
             const nameEl = document.createElement('span');
             nameEl.className = 'hud-player-name';
             nameEl.textContent = player.name;
 
-            header.appendChild(colorDot);
+            header.appendChild(statusDot);
             header.appendChild(nameEl);
-            row.appendChild(header);
+            details.appendChild(header);
 
             // Stats Row: Score, Length, Speed
             const statsRow = document.createElement('div');
@@ -102,7 +114,8 @@ export class GameHUD {
             statsRow.appendChild(createStat('LEN', player.length));
             statsRow.appendChild(createStat('SPD', Math.round(player.speed)));
 
-            row.appendChild(statsRow);
+            details.appendChild(statsRow);
+            row.appendChild(details);
             this.playersContainer.appendChild(row);
         }
     }

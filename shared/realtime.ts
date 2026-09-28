@@ -36,6 +36,7 @@ export type PauseInput = SnakeState & {
 
 export type DeathInput = SnakeState & {
   type: 'death';
+  submissionId: string;
   seq: number;
   step: number;
   reason: string;
@@ -97,6 +98,8 @@ export type RealtimeServerMessage =
   | { v: 2; type: 'player.joined'; payload: unknown }
   | { v: 2; type: 'food.changed'; payload: unknown }
   | { v: 2; type: 'game.saved'; payload: unknown }
+  | { v: 2; type: 'game.saveStarted'; payload: { submissionId: string; stage: string } }
+  | { v: 2; type: 'game.saveFailed'; payload: { submissionId: string; code: string; retryable: boolean } }
   | { v: 2; type: 'error'; payload: { code: string } }
   | { v: 2; type: 'presence.updated'; payload: { count: number } };
 

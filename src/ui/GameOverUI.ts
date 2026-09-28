@@ -5,6 +5,7 @@ export class GameOverUI {
     private content!: HTMLElement;
     private restartBtn!: HTMLButtonElement;
     private nextBtn!: HTMLButtonElement;
+    private retrySaveBtn!: HTMLButtonElement;
     private errorEl!: HTMLElement;
     private saveStatusEl!: HTMLElement;
 
@@ -23,13 +24,15 @@ export class GameOverUI {
     private onRestart: () => void;
     private onNext: () => void;
     private onLeaderboard: () => void;
+    private onRetrySave: () => void;
     private resizeObserver?: ResizeObserver;
     private readonly onWindowResize = () => this.updateScale();
 
-    constructor(onRestart: () => void, onNext: () => void, onLeaderboard: () => void) {
+    constructor(onRestart: () => void, onNext: () => void, onLeaderboard: () => void, onRetrySave: () => void) {
         this.onRestart = onRestart;
         this.onNext = onNext;
         this.onLeaderboard = onLeaderboard;
+        this.onRetrySave = onRetrySave;
         this.createUI();
     }
 
@@ -124,6 +127,13 @@ export class GameOverUI {
         // Update restart button delay to come after leaderboard
         this.restartBtn.style.transitionDelay = '0.4s';
         this.content.appendChild(this.restartBtn);
+
+        this.retrySaveBtn = document.createElement('button');
+        this.retrySaveBtn.className = 'restart-btn retry-save-btn';
+        this.retrySaveBtn.textContent = 'RETRY SAVE';
+        this.retrySaveBtn.hidden = true;
+        this.retrySaveBtn.addEventListener('click', () => this.onRetrySave());
+        this.content.appendChild(this.retrySaveBtn);
 
         this.errorEl = document.createElement('p');
         this.errorEl.className = 'game-over-error';
@@ -271,6 +281,7 @@ export class GameOverUI {
     public show() {
         this.saveStatusEl.hidden = true;
         this.saveStatusEl.textContent = '';
+        this.retrySaveBtn.hidden = true;
         this.container.classList.add('active');
         requestAnimationFrame(() => this.updateScale());
     }
@@ -278,6 +289,7 @@ export class GameOverUI {
     public setLoading(loading: boolean, error?: string) {
         this.restartBtn.disabled = loading;
         this.nextBtn.disabled = loading;
+        if (loading) this.retrySaveBtn.hidden = true;
         this.restartBtn.textContent = loading ? 'SAVING…' : 'RESTART';
         this.nextBtn.textContent = loading ? 'PLEASE WAIT…' : 'NEXT';
         this.errorEl.hidden = !error;
@@ -289,6 +301,11 @@ export class GameOverUI {
         this.saveStatusEl.hidden = false;
         this.saveStatusEl.textContent = message;
         requestAnimationFrame(() => this.updateScale());
+    }
+
+    public showSaveFailure(submissionId: string, code: string, retryable: boolean) {
+        this.setLoading(false, `SAVE FAILED: ${code} · ${submissionId}`.toUpperCase());
+        this.retrySaveBtn.hidden = !retryable;
     }
 
     public hide() {

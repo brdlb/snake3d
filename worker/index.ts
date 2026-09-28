@@ -173,6 +173,8 @@ function deathInput(value: unknown): value is DeathInput {
   const action = value as Record<string, unknown>;
   return (
     action.type === 'death' &&
+    typeof action.submissionId === 'string' &&
+    /^[0-9a-f-]{36}$/i.test(action.submissionId) &&
     sequence(action.seq) &&
     sequence(action.step) &&
     typeof action.reason === 'string'
@@ -417,6 +419,26 @@ export default {
       return json({ seed: await createRoomSeed(env, user) }, 201, requestId);
     }
     const roomResource = path.match(/^\/api\/v1\/rooms\/(\d+)$/);
+    const roomDiagnostics = path.match(/^\/api\/v1\/rooms\/(\d+)\/diagnostics$/);
+    if (roomDiagnostics && request.method === 'GET') {
+      const seed = Number(roomDiagnostics[1]);
+      const assigned = await env.DB.prepare('SELECT 1 FROM room_assignments WHERE room_seed=? AND user_id=?')
+        .bind(seed, user.id).first();
+      if (!assigned) return fail('ROOM_CONTEXT_MISMATCH', 403, requestId);
+      const [room, latest] = await Promise.all([
+        env.DB.prepare('SELECT seed,total_games_played,updated_at FROM rooms WHERE seed=?').bind(seed).first(),
+        env.DB.prepare('SELECT id,created_at,result_json FROM game_submissions WHERE room_seed=? AND user_id=? ORDER BY created_at DESC LIMIT 1')
+          .bind(seed, user.id).first<{ id: string; created_at: string; result_json: string }>(),
+      ]);
+      if (!room) return fail('ROOM_NOT_FOUND', 404, requestId);
+      const response = await env.ROOMS.get(env.ROOMS.idFromName(String(seed))).fetch('https://room/diagnostics', {
+        headers: { 'x-user-id': user.id, 'x-seed': String(seed) },
+      });
+      if (!response.ok) return fail('ROOM_DIAGNOSTICS_UNAVAILABLE', 502, requestId);
+      return json({ room, live: await response.json(), latestSubmission: latest ? {
+        id: latest.id, createdAt: latest.created_at, result: JSON.parse(latest.result_json),
+      } : null }, 200, requestId);
+    }
     if (roomResource && request.method === 'DELETE') {
       const seed = Number(roomResource[1]);
       const exists = await env.DB.prepare('SELECT 1 FROM rooms WHERE seed=?').bind(seed).first();
@@ -518,6 +540,11 @@ export class RoomDurableObject {
   private simulation: SimulationState | null = null;
   private restartUserId: string | null = null;
   private lastSpectatorSyncRequestAt = 0;
+  private async saveStage(seed: number, userId: string, submissionId: string, stage: string, code?: string) {
+    const trace = { seed, submissionId, stage, code, at: now() };
+    console.log(JSON.stringify({ event: 'game.save', ...trace }));
+    await this.ctx.storage.put(`save-trace:${userId}`, trace);
+  }
   private snapshot(state: SimulationState) {
     return {
       seed: state.seed,
@@ -570,6 +597,31 @@ export class RoomDurableObject {
   }
   async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
+    if (path === '/diagnostics') {
+      const userId = request.headers.get('x-user-id');
+      const seed = Number(request.headers.get('x-seed'));
+      if (!userId || !Number.isSafeInteger(seed)) return new Response(null, { status: 403 });
+      const state = this.simulation ?? await this.ctx.storage.get<SimulationState>('simulation');
+      const sockets = new Set(this.ctx.getWebSockets().map((socket) => {
+        const attachment = socket.deserializeAttachment() as { entityId?: string } | null;
+        return attachment?.entityId;
+      }));
+      const terminal = await this.ctx.storage.get<{ player: SimPlayer; createdAt?: number }>(`terminal:${userId}`);
+      return json({
+        seed,
+        tick: state?.tick ?? null,
+        players: state ? Object.values(state.players).map((player) => ({
+          entityId: player.entityId,
+          spawnIndex: player.spawnIndex,
+          phantom: player.phantom,
+          alive: player.alive,
+          connected: sockets.has(player.entityId),
+          lastStateSeq: player.lastStateSeq ?? null,
+        })) : [],
+        terminal: terminal ? { instanceId: terminal.player.instanceId, score: terminal.player.score, createdAt: terminal.createdAt } : null,
+        save: await this.ctx.storage.get(`save-trace:${userId}`) ?? null,
+      });
+    }
     if (path === '/occupancy') {
       const state = this.simulation ?? (await this.ctx.storage.get<SimulationState>('simulation'));
       const connected = new Set(this.ctx.getWebSockets().map((socket) => {
@@ -988,6 +1040,7 @@ export class RoomDurableObject {
   }
   private async saveTerminal(
     seed: number,
+    submissionId: string,
     terminal: {
       player: SimPlayer;
       deathPosition: unknown;
@@ -1001,7 +1054,6 @@ export class RoomDurableObject {
       .first<Record<string, unknown>>();
     if (!userRow) return null;
     const user = toUser(userRow),
-      submissionId = `terminal:${seed}:${user.id}:${terminal.player.instanceId ?? 'none'}`,
       old = await this.env.DB.prepare(
         'SELECT result_json FROM game_submissions WHERE id=? AND user_id=?',
       )
@@ -1157,6 +1209,7 @@ export class RoomDurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    let deathContext: { seed: number; submissionId: string } | null = null;
     try {
       const event = JSON.parse(String(message)) as RealtimeClientMessage,
         attachment = ws.deserializeAttachment() as {
@@ -1167,6 +1220,8 @@ export class RoomDurableObject {
           spectator?: boolean;
           instanceId?: string;
         };
+      if (event?.type === 'player.died' && typeof event.payload?.action?.submissionId === 'string')
+        deathContext = { seed: attachment.seed, submissionId: event.payload.action.submissionId };
       if (event?.v !== 2) throw new Error();
       if (event.type === 'ping') {
         ws.send(JSON.stringify({ v: 2, type: 'pong' }));
@@ -1178,9 +1233,51 @@ export class RoomDurableObject {
         return;
       }
       if (attachment.spectator) throw new Error();
+      const action = 'payload' in event && 'action' in event.payload ? event.payload.action : undefined;
+      const deathSubmissionId = event.type === 'player.died' && action && typeof action === 'object' &&
+        'submissionId' in action && typeof action.submissionId === 'string' ? action.submissionId : null;
       const player = attachment.entityId ? state.players[attachment.entityId] : undefined;
       if (!player || player.instanceId !== attachment.instanceId) {
-        ws.send(JSON.stringify({ v: 2, type: 'error', payload: { code: 'STALE_CONNECTION' } }));
+        if (deathSubmissionId) await this.saveStage(state.seed, attachment.userId, deathSubmissionId, 'rejected', 'STALE_CONNECTION');
+        ws.send(JSON.stringify(deathSubmissionId
+          ? { v: 2, type: 'game.saveFailed', payload: { submissionId: deathSubmissionId, code: 'STALE_CONNECTION', retryable: false } }
+          : { v: 2, type: 'error', payload: { code: 'STALE_CONNECTION' } }));
+        return;
+      }
+      if (event.type === 'player.died' && !deathInput(action)) {
+        if (deathSubmissionId) await this.saveStage(state.seed, player.id, deathSubmissionId, 'rejected', 'INVALID_DEATH_PAYLOAD');
+        ws.send(JSON.stringify(deathSubmissionId
+          ? { v: 2, type: 'game.saveFailed', payload: { submissionId: deathSubmissionId, code: 'INVALID_DEATH_PAYLOAD', retryable: false } }
+          : { v: 2, type: 'error', payload: { code: 'INVALID_DEATH_PAYLOAD' } }));
+        return;
+      }
+      if (!player.alive && event.type === 'player.died' && deathInput(action)) {
+        const terminal = await this.ctx.storage.get<{
+          player: SimPlayer; deathPosition: Axis; reason: string; trajectory: ReplayTrajectory; submissionId: string;
+        }>(`terminal:${player.id}`);
+        if (!terminal || terminal.player.instanceId !== player.instanceId || terminal.submissionId !== action.submissionId) {
+          await this.saveStage(state.seed, player.id, action.submissionId, 'rejected', 'TERMINAL_NOT_AVAILABLE');
+          ws.send(JSON.stringify({ v: 2, type: 'game.saveFailed', payload: {
+            submissionId: action.submissionId, code: 'TERMINAL_NOT_AVAILABLE', retryable: false,
+          } }));
+          return;
+        }
+        try {
+          await this.saveStage(state.seed, player.id, action.submissionId, 'retrying');
+          ws.send(JSON.stringify({ v: 2, type: 'game.saveStarted', payload: { submissionId: action.submissionId, stage: 'retrying' } }));
+          const result = await this.saveTerminal(state.seed, action.submissionId, terminal);
+          if (!result) throw new Error('USER_NOT_FOUND');
+          await this.saveStage(state.seed, player.id, action.submissionId, 'databaseCommitted');
+          await this.saveStage(state.seed, player.id, action.submissionId, 'saved');
+          ws.send(JSON.stringify({ v: 2, type: 'game.saved', payload: { ...result, submissionId: action.submissionId } }));
+        } catch (error) {
+          const code = error instanceof Error && error.message === 'USER_NOT_FOUND' ? 'USER_NOT_FOUND' : 'SAVE_FAILED';
+          console.error(JSON.stringify({ event: 'game.saveError', seed: state.seed, submissionId: action.submissionId, error: String(error) }));
+          await this.saveStage(state.seed, player.id, action.submissionId, 'failed', code);
+          ws.send(JSON.stringify({ v: 2, type: 'game.saveFailed', payload: {
+            submissionId: action.submissionId, code, retryable: code === 'SAVE_FAILED',
+          } }));
+        }
         return;
       }
       if (!player.alive) {
@@ -1201,7 +1298,6 @@ export class RoomDurableObject {
         });
         return;
       }
-      const action = 'payload' in event && 'action' in event.payload ? event.payload.action : undefined;
       if (event.type === 'player.state' && stateInput(action)) {
         if (action.seq <= (player.lastStateSeq ?? -1)) return;
         player.segments = action.segments;
@@ -1267,7 +1363,16 @@ export class RoomDurableObject {
         return;
       }
       if (event.type === 'player.died' && deathInput(action)) {
-        if (action.seq <= (player.lastStateSeq ?? -1)) return;
+        if (action.seq <= (player.lastStateSeq ?? -1)) {
+          await this.saveStage(state.seed, player.id, action.submissionId, 'rejected', 'STALE_DEATH_SEQUENCE');
+          ws.send(JSON.stringify({ v: 2, type: 'game.saveFailed', payload: {
+            submissionId: action.submissionId, code: 'STALE_DEATH_SEQUENCE', retryable: false,
+          } }));
+          return;
+        }
+        try {
+        await this.saveStage(state.seed, player.id, action.submissionId, 'received');
+        ws.send(JSON.stringify({ v: 2, type: 'game.saveStarted', payload: { submissionId: action.submissionId, stage: 'received' } }));
         player.segments = action.segments;
         player.direction = action.direction;
         player.up = action.up;
@@ -1286,14 +1391,18 @@ export class RoomDurableObject {
           trajectory,
           tick: state.tick,
           createdAt: Date.now(),
+          submissionId: action.submissionId,
         });
         await this.persist(state);
-        const result = await this.saveTerminal(state.seed, {
+        await this.saveStage(state.seed, player.id, action.submissionId, 'terminalStored');
+        const result = await this.saveTerminal(state.seed, action.submissionId, {
           player,
           deathPosition,
           reason: action.reason,
           trajectory,
         });
+        if (!result) throw new Error('USER_NOT_FOUND');
+        await this.saveStage(state.seed, player.id, action.submissionId, 'databaseCommitted');
         this.broadcast(
           {
             v: 2,
@@ -1307,7 +1416,17 @@ export class RoomDurableObject {
           },
           ws,
         );
-        if (result) this.sendToUser(player.id, { v: 2, type: 'game.saved', payload: result });
+        await this.saveStage(state.seed, player.id, action.submissionId, 'saved');
+        ws.send(JSON.stringify({ v: 2, type: 'game.saved', payload: { ...result, submissionId: action.submissionId } }));
+        } catch (error) {
+          const code = error instanceof Error && ['MISSING_REPLAY_TRAJECTORY', 'USER_NOT_FOUND'].includes(error.message)
+            ? error.message : 'SAVE_FAILED';
+          console.error(JSON.stringify({ event: 'game.saveError', seed: state.seed, submissionId: action.submissionId, error: String(error) }));
+          await this.saveStage(state.seed, player.id, action.submissionId, 'failed', code);
+          ws.send(JSON.stringify({ v: 2, type: 'game.saveFailed', payload: {
+            submissionId: action.submissionId, code, retryable: code === 'SAVE_FAILED',
+          } }));
+        }
         return;
       }
       if (
@@ -1343,8 +1462,15 @@ export class RoomDurableObject {
         },
         ws,
       );
-    } catch {
-      ws.send(JSON.stringify({ v: 2, type: 'error', payload: { code: 'INVALID_MESSAGE' } }));
+    } catch (error) {
+      if (deathContext) {
+        console.error(JSON.stringify({ event: 'game.saveError', ...deathContext, error: String(error) }));
+        ws.send(JSON.stringify({ v: 2, type: 'game.saveFailed', payload: {
+          submissionId: deathContext.submissionId, code: 'PROCESSING_FAILED', retryable: true,
+        } }));
+      } else {
+        ws.send(JSON.stringify({ v: 2, type: 'error', payload: { code: 'INVALID_MESSAGE' } }));
+      }
     }
   }
   async webSocketClose(ws: WebSocket) {

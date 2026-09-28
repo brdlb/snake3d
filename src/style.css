@@ -325,6 +325,7 @@ body {
   pointer-events: none;
   opacity: 0.8;
 }
+.game-over-screen .retry-save-btn[hidden] { display: none; }
 
 @media (max-width: 600px) {
   .mini-map {
@@ -362,10 +363,27 @@ body {
 
 .hud-player-row {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: stretch;
+  gap: 8px;
   padding-bottom: 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.hud-player-pattern {
+  width: 48px;
+  height: auto;
+  aspect-ratio: 1;
+  align-self: stretch;
+  flex: 0 0 48px;
+  image-rendering: pixelated;
+}
+
+.hud-player-details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  min-height: 48px;
 }
 
 .hud-player-row:last-child {
@@ -383,13 +401,14 @@ body {
   gap: 8px;
 }
 
-.hud-player-color {
+.hud-player-status {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
   flex-shrink: 0;
-  box-shadow: 0 0 5px currentColor;
 }
+
+.hud-player-status-online { background: #45d870; }
+.hud-player-status-phantom { background: #80878a; }
 
 .hud-player-name {
   font-size: 13px;
@@ -407,8 +426,7 @@ body {
 .hud-player-stats-row {
   display: flex;
   gap: 12px;
-  padding-left: 16px;
-  /* Align with name (8px dot + 8px gap) */
+  padding-left: 0;
 }
 
 .hud-stat {
@@ -1139,7 +1157,6 @@ button, input { font-family: inherit; }
 
 :root body .hud-panel { top: 20px; left: 20px; min-width: 150px; padding: 14px; gap: 10px; border: 1px solid rgba(255,255,255,.7); background: rgba(0,0,0,.72); backdrop-filter: none; font-family: 'Consolas', monospace; }
 :root body .hud-panel::before { content: 'SYS:// LIVE'; color: #aaa; font-size: 9px; letter-spacing: .14em; }
-:root body .hud-player-color { border-radius: 0; box-shadow: none !important; }
 :root body .hud-player-name { font: 10px 'Consolas', monospace; letter-spacing: .1em; }
 :root body .hud-player-stats-row { padding-left: 0; }
 :root body .hud-stat-label { font: 8px 'Consolas', monospace; letter-spacing: .08em; }

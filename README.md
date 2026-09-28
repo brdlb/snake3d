@@ -69,6 +69,12 @@ After editing client code, run `npm run build` again so the Worker serves the up
 
 The server checks message structure and some movement rules, but it currently accepts client-reported positions, speed, and score. Treat room records and leaderboard results as casual-game results, not cheat-resistant rankings.
 
+### Investigating a delayed game save
+
+In an authenticated browser profile assigned to a room, open `/api/v1/rooms/<seed>/diagnostics` on the Worker origin. The endpoint returns the D1 room row and the player's latest submission, plus the Durable Object roster, the player's latest terminal record, and its latest save stage. Other profiles receive `ROOM_CONTEXT_MISMATCH`. The `submissionId` in the response matches the `game.save` entries in Worker logs and the `game_submissions.id` D1 row.
+
+The browser sends `player.died` with a stable `submissionId`. The server responds with `game.saveStarted`, then `game.saved` or `game.saveFailed`. A retry uses the same ID and the stored terminal record, so an already committed result is returned without a second write. The Game Over screen offers `RETRY SAVE` after a retryable failure. There is no client timeout: if no response arrives, inspect the diagnostics endpoint and Worker logs by `submissionId`.
+
 ## Deployment
 
 `wrangler.jsonc` defines the Worker, its `DB` D1 binding, the `ROOMS` Durable Object binding, built asset directory, and custom-domain route. To deploy to your own Cloudflare account, configure the D1 database and route for that account first. Then build, apply the **remote** migrations, and deploy:

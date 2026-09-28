@@ -424,3 +424,79 @@ describe('room state preparation', () => {
     expect(storage.put).not.toHaveBeenCalled();
   });
 });
+
+describe('terminal save diagnostics', () => {
+  function setup() {
+    const state = createSimulation(123);
+    const player = addPlayer(state, 'player-1', 'Player', 0, {
+      entityId: 'entity-1', instanceId: 'connection-1',
+    });
+    state.trajectories = { 'player-1': {
+      startPosition: player.segments[0], startDirection: player.direction,
+      spawnIndex: 0, initialSpeed: player.speed, changes: [],
+    } };
+    const records = new Map<string, any>();
+    const storage = {
+      get: vi.fn(async (key: string) => records.get(key)),
+      put: vi.fn(async (key: string, value: any) => { records.set(key, value); }),
+      deleteAlarm: vi.fn(),
+    };
+    const sender = {
+      deserializeAttachment: () => ({ userId: 'player-1', entityId: 'entity-1', seed: 123, instanceId: 'connection-1' }),
+      send: vi.fn(), close: vi.fn(),
+    };
+    const object = new RoomDurableObject({ storage, getWebSockets: () => [sender] } as any, {} as any);
+    (object as any).simulation = state;
+    const submit = (seq: number) => object.webSocketMessage(sender as any, JSON.stringify({
+      v: 2, type: 'player.died', payload: { action: {
+        type: 'death', submissionId: 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa', seq, step: 3, reason: 'bounds',
+        segments: player.segments, direction: player.direction, up: player.up,
+        score: 45, speed: player.speed,
+      } },
+    }));
+    return { state, player, sender, object, records, submit };
+  }
+
+  it('returns an explicit failure for a stale death sequence', async () => {
+    const { player, sender, submit } = setup();
+    player.lastStateSeq = 5;
+    await submit(5);
+    expect(JSON.parse(sender.send.mock.lastCall![0])).toMatchObject({
+      type: 'game.saveFailed', payload: { code: 'STALE_DEATH_SEQUENCE', retryable: false },
+    });
+  });
+
+  it('records a terminal and allows an idempotent retry after a save failure', async () => {
+    const { player, sender, object, records, submit } = setup();
+    const save = vi.fn().mockRejectedValueOnce(new Error('D1 unavailable'))
+      .mockResolvedValue({ saved: true, message: 'Game and replay saved' });
+    (object as any).saveTerminal = save;
+    await submit(1);
+    expect(player.alive).toBe(false);
+    expect(records.get('save-trace:player-1')).toMatchObject({ stage: 'failed', code: 'SAVE_FAILED' });
+    expect(JSON.parse(sender.send.mock.lastCall![0])).toMatchObject({
+      type: 'game.saveFailed', payload: { retryable: true },
+    });
+    await submit(1);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[0][1]).toBe(save.mock.calls[1][1]);
+    expect(records.get('save-trace:player-1')).toMatchObject({ stage: 'saved' });
+    expect(JSON.parse(sender.send.mock.lastCall![0])).toMatchObject({
+      type: 'game.saved', payload: { saved: true, submissionId: 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa' },
+    });
+  });
+
+  it('reports roster, terminal, and latest save stage without exposing the trajectory', async () => {
+    const { object, records, player } = setup();
+    records.set('terminal:player-1', { player, createdAt: 12345, trajectory: { changes: [{ secret: true }] } });
+    records.set('save-trace:player-1', { stage: 'failed', code: 'SAVE_FAILED', submissionId: 'attempt-1' });
+    const response = await object.fetch(new Request('https://room/diagnostics', {
+      headers: { 'x-user-id': 'player-1', 'x-seed': '123' },
+    }));
+    const result = await response.json() as any;
+    expect(result.players).toMatchObject([{ entityId: 'entity-1', alive: true, connected: true }]);
+    expect(result.terminal).toMatchObject({ score: player.score, createdAt: 12345 });
+    expect(result.save).toMatchObject({ stage: 'failed', code: 'SAVE_FAILED' });
+    expect(JSON.stringify(result)).not.toContain('secret');
+  });
+});

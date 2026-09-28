@@ -26,6 +26,7 @@ import { PauseUI, GameStats, type PauseSnake } from '../ui/PauseUI';
 import type { ReplayData, RoomData } from '../types/replay';
 import { replaceRoomInAddress } from '../utils/RoomUrl';
 import type {
+  DeathInput,
   PlayerDirectionChanged,
   PlayerDied,
   PlayerPauseChanged,
@@ -166,6 +167,7 @@ export class Game {
   private playerTick = 0;
   private localInputSeq = 0;
   private localStateSeq = 0;
+  private pendingDeathAction: DeathInput | null = null;
   private localSnakeInitialized = false;
   private wasBoosting = false;
   private appearance: SnakeAppearance;
@@ -262,6 +264,12 @@ export class Game {
         void this.resetGame('next');
       },
       () => this.leaderboardUI.show(),
+      () => {
+        if (!this.pendingDeathAction) return;
+        this.gameOverUI.setLoading(true);
+        if (!this.networkManager.sendPlayerDeath(this.pendingDeathAction))
+          this.gameOverUI.showSaveFailure(this.pendingDeathAction.submissionId, 'SOCKET_UNAVAILABLE', true);
+      },
     );
     this.hud = new GameHUD();
     this.miniMap = new MiniMap();
@@ -311,12 +319,21 @@ export class Game {
     new NetworkStatusUI();
 
     // Listen for room data (phantoms)
-    this.networkManager.on('game.saved', (result: { saved: boolean; message: string }) => {
+    this.networkManager.on('game.saved', (result: { saved: boolean; message: string; submissionId?: string }) => {
       console.log(`[Game] Game result: ${result.message}`);
-      if (result.saved) {
+      if (result.saved && result.submissionId === this.pendingDeathAction?.submissionId) {
+        this.pendingDeathAction = null;
         this.gameOverUI.setLoading(false);
-        this.gameOverUI.setSaveStatus(result.message);
+        this.gameOverUI.setSaveStatus(result.message.toUpperCase());
       }
+    });
+    this.networkManager.on('game.saveStarted', (result: { submissionId: string; stage: string }) => {
+      if (result.submissionId === this.pendingDeathAction?.submissionId)
+        console.log(`[Game] Save ${result.submissionId}: ${result.stage}`);
+    });
+    this.networkManager.on('game.saveFailed', (result: { submissionId: string; code: string; retryable: boolean }) => {
+      if (result.submissionId !== this.pendingDeathAction?.submissionId) return;
+      this.gameOverUI.showSaveFailure(result.submissionId, result.code, result.retryable);
     });
 
     // Check if already authenticated (initialized in main.ts)
@@ -605,6 +622,7 @@ export class Game {
     this.playerTick = 0;
     this.localInputSeq = 0;
     this.localStateSeq = 0;
+    this.pendingDeathAction = null;
     this.localSnakeInitialized = false;
     this.wasBoosting = false;
     this.currentSeed = data.seed;
@@ -1681,6 +1699,7 @@ export class Game {
         speed: speed,
         isPlayer: true,
         color: '#ffffff',
+        appearance: this.appearance,
       });
     }
 
@@ -1694,6 +1713,8 @@ export class Game {
           speed: opponent.speed,
           isPlayer: false,
           color: opponent.color,
+          appearance: opponent.appearance,
+          isPhantom: opponent.phantom,
           isDead: !opponent.alive,
         });
       }
@@ -1707,6 +1728,8 @@ export class Game {
         speed: phantom.getSPM(),
         isPlayer: false,
         color: phantom.getColorHex(),
+        appearance: phantom.appearance,
+        isPhantom: true,
         isDead: phantom.isDeadNow(),
       });
     }
@@ -2069,13 +2092,16 @@ export class Game {
       // The restart assignment reads replays from D1, so wait until the
       // WebSocket death handler has committed this run.
       this.gameOverUI.setLoading(true);
-      this.networkManager.sendPlayerDeath({
+      this.pendingDeathAction = {
         type: 'death',
+        submissionId: crypto.randomUUID(),
         seq: ++this.localStateSeq,
         step: this.playerTick,
         reason,
         ...this.livePlayerState(),
-      });
+      };
+      if (!this.networkManager.sendPlayerDeath(this.pendingDeathAction))
+        this.gameOverUI.showSaveFailure(this.pendingDeathAction.submissionId, 'SOCKET_UNAVAILABLE', true);
     }
 
     // Online results are persisted only after the local client confirms death.

@@ -61,7 +61,7 @@ export class NetworkManager {
   sendDirection(action: DirectionInput) { this.sendRealtime({v:2,type:'player.directionChanged',payload:{action}}); }
   sendPause(action: PauseInput) { this.sendRealtime({v:2,type:'player.pauseChanged',payload:{action}}); }
   sendPlayerState(action: StateInput) { this.sendRealtime({v:2,type:'player.state',payload:{action}}); }
-  sendPlayerDeath(action: DeathInput) { this.sendRealtime({v:2,type:'player.died',payload:{action}}); }
+  sendPlayerDeath(action: DeathInput): boolean { if (this.socket?.readyState !== WebSocket.OPEN) return false; this.sendRealtime({v:2,type:'player.died',payload:{action}}); return true; }
   sendAppearance(appearance: SnakeAppearance) { this.sendRealtime({v:2,type:'player.appearance',payload:{appearance}}); }
   requestResync() { this.sendRealtime({v:2,type:'room.resync'}); }
   private scheduleReconnect(){if(this.roomSeed===null||(typeof navigator!=='undefined'&&!navigator.onLine)||this.retries>=5)return;const delay=Math.min(1000*2**this.retries++,10000);window.setTimeout(()=>this.roomSeed!==null&&this.openRoomSocket(this.roomSeed,this.roomIsSpectator,this.roomIsRestarting),delay);}
