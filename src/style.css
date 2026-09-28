@@ -482,11 +482,15 @@ body {
 .welcome-content {
   position: relative;
   z-index: 1;
-  max-width: 500px;
-  width: 90%;
-  text-align: center;
-  padding: 30px 25px;
-  background: #000000;
+  width: min(92vw, 980px);
+  max-width: 980px;
+  max-height: 92dvh;
+  padding: clamp(20px, 3vw, 46px);
+  overflow-y: inherit;
+  text-align: left;
+  background: linear-gradient(90deg, #000000fa 0 48%, #000000b0 100%),
+    repeating-linear-gradient(0deg, #0000 0 38px, #273036 39px 40px),
+    repeating-linear-gradient(90deg, #0000 0 38px, #273036 39px 40px);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.1);
