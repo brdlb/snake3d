@@ -10,7 +10,7 @@ import {
   type SimPlayer,
   type SimulationState,
 } from '../shared/simulation';
-import { DEFAULT_SNAKE_APPEARANCE, isSnakeAppearance, normalizeSnakeAppearance, type SnakeAppearance } from '../shared/appearance';
+import { createRandomSnakeAppearance, isSnakeAppearance, normalizeSnakeAppearance, type SnakeAppearance } from '../shared/appearance';
 import type { PauseInput } from '../shared/realtime';
 import type {
   DeathInput,
@@ -318,7 +318,7 @@ export default {
         gamesPlayed: 0,
         totalScore: 0,
         elo: 1000,
-        settings: { musicVolume: 0.5, sfxVolume: 0.7, snakeAppearance: DEFAULT_SNAKE_APPEARANCE },
+        settings: { musicVolume: 0.5, sfxVolume: 0.7, snakeAppearance: createRandomSnakeAppearance() },
       };
       await env.DB.batch([
         env.DB.prepare(

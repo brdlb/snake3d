@@ -49,7 +49,7 @@ interface Pulse {
 
 import { Pathfinder } from './Pathfinder';
 import { OfflineDataManager } from '../utils/OfflineDataManager';
-import { normalizeSnakeAppearance, type SnakeAppearance } from '../../shared/appearance';
+import { createRandomSnakeAppearance, normalizeSnakeAppearance, type SnakeAppearance } from '../../shared/appearance';
 import { createSnakePatternMesh, markSnakePatternsUpdated, setSnakePatternAt } from '../graphics/SnakePatternMaterial';
 import { WallMaterial } from '../graphics/WallMaterial';
 import { TutorialSession, type TutorialCollectibleEffect } from '../tutorial/TutorialSession';
@@ -200,7 +200,10 @@ export class Game {
     this.tutorialMode = options.tutorial === true;
     let savedAppearance: unknown;
     try { savedAppearance = JSON.parse(localStorage.getItem('snake3d_appearance') ?? 'null'); } catch { savedAppearance = null; }
-    this.appearance = normalizeSnakeAppearance(savedAppearance);
+    this.appearance = savedAppearance === null
+      ? createRandomSnakeAppearance()
+      : normalizeSnakeAppearance(savedAppearance);
+    if (savedAppearance === null) localStorage.setItem('snake3d_appearance', JSON.stringify(this.appearance));
     // Initialize Player Name (Persistent)
     this.playerName =
       localStorage.getItem('snake3d_player_name') || localStorage.getItem('snake3d_username') || `Player${Math.floor(Math.random() * 10000)}`;

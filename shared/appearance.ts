@@ -10,6 +10,13 @@ export const DEFAULT_SNAKE_APPEARANCE: SnakeAppearance = {
   patternColor: '#d98c8c',
 };
 
+export function createRandomSnakeAppearance(): SnakeAppearance {
+  return {
+    ...DEFAULT_SNAKE_APPEARANCE,
+    patternSeed: crypto.getRandomValues(new Uint32Array(1))[0],
+  };
+}
+
 /** Builds a hex color from HSL components, with hue in degrees and S/L in percent. */
 export function hslToHex(hue: number, saturation: number, lightness: number): string {
   const h = ((hue % 360) + 360) % 360;
