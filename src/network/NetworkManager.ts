@@ -29,6 +29,7 @@ export class NetworkManager {
   send(event:string,data?:any) { if(event==='room:join'){void this.requestRoom(data?.action ?? 'initial',data?.contextSeed);return;} if(this.socket?.readyState===WebSocket.OPEN)this.socket.send(JSON.stringify({v:1,type:event,id:crypto.randomUUID(),payload:data})); }
   async requestRoom(action:RoomAction, contextSeed?:number):Promise<RoomData> { const room=await this.api<RoomData>('/api/v1/matches',{method:'POST',body:JSON.stringify(action==='join'||action==='spectate'?{action,seed:contextSeed}:{action,contextSeed})}); console.log('[Network] Full phantom replay records received from server:', room.phantoms); this.roomSeed=room.seed; this.roomIsSpectator=action==='spectate'; this.roomIsRestarting=action==='restart'; this.openRoomSocket(room.seed,this.roomIsSpectator,this.roomIsRestarting); return room; }
   requestRooms():Promise<RoomSummary[]> { return this.api<RoomSummary[]>('/api/v1/rooms'); }
+  requestEnterRoom():Promise<{seed:number}> { return this.api<{seed:number}>('/api/v1/rooms/enter'); }
   createRoom():Promise<{seed:number}> { return this.api<{seed:number}>('/api/v1/rooms',{method:'POST',body:'{}'}); }
   deleteRoom(seed:number):Promise<{deleted:boolean;seed:number}> { return this.api<{deleted:boolean;seed:number}>(`/api/v1/rooms/${seed}`,{method:'DELETE'}); }
   requestLeaderboard() { void this.api<any[]>('/api/v1/leaderboard?limit=50').then(data=>this.emit('leaderboard:data',data)).catch(()=>this.emit('leaderboard:error',{message:'Failed to load leaderboard'})); }

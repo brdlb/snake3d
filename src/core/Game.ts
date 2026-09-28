@@ -237,6 +237,7 @@ export class Game {
       () => {
         // On Close Callback
         this.settingsUI.hide();
+        if (document.getElementById('welcome-screen')) return;
         this.hud.togglePauseButton(true);
         this.pauseUI.show();
       },
@@ -432,7 +433,11 @@ export class Game {
         });
     } else {
       // Welcome Screen - показываем приветственный экран
-      this.welcomeScreen = new WelcomeScreen((mode, roomSeed) => this.handleGameStart(mode, roomSeed));
+      this.welcomeScreen = new WelcomeScreen(
+        (mode, roomSeed) => this.handleGameStart(mode, roomSeed),
+        () => this.leaderboardUI.show(),
+        () => this.settingsUI.show(),
+      );
       if (new URLSearchParams(window.location.search).get('room') === null) {
         this.initialSpectatorPromise = this.handleGameStart('spectator');
       }
@@ -2021,7 +2026,11 @@ export class Game {
       this.tutorialConnectionStarted = true;
       try {
         await this.networkManager.connect();
-        this.welcomeScreen = new WelcomeScreen((mode, roomSeed) => this.handleGameStart(mode, roomSeed));
+        this.welcomeScreen = new WelcomeScreen(
+          (mode, roomSeed) => this.handleGameStart(mode, roomSeed),
+          () => this.leaderboardUI.show(),
+          () => this.settingsUI.show(),
+        );
       } catch (error) {
         console.warn('[Tutorial] Could not connect after local game over; staying offline:', error);
       }

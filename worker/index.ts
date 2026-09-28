@@ -378,6 +378,18 @@ export default {
         requestId,
       );
     }
+    if (path === '/api/v1/rooms/enter' && request.method === 'GET') {
+      const rows = await env.DB.prepare('SELECT seed FROM rooms').all<{ seed: number }>();
+      if (rows.results.length === 0) return json({ seed: await createRoomSeed(env, user) }, 200, requestId);
+      const counts = await Promise.all(rows.results.map(async (row) => {
+        const seed = Number(row.seed);
+        const response = await env.ROOMS.get(env.ROOMS.idFromName(String(seed))).fetch('https://room/occupancy');
+        return { seed, count: (await response.json<{ count: number }>()).count };
+      }));
+      const most = Math.max(...counts.map((room) => room.count));
+      const choices = counts.filter((room) => room.count === most);
+      return json({ seed: choices[Math.floor(Math.random() * choices.length)].seed }, 200, requestId);
+    }
     if (path === '/api/v1/rooms' && request.method === 'POST') {
       return json({ seed: await createRoomSeed(env, user) }, 201, requestId);
     }
@@ -535,6 +547,15 @@ export class RoomDurableObject {
   }
   async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
+    if (path === '/occupancy') {
+      const state = this.simulation ?? (await this.ctx.storage.get<SimulationState>('simulation'));
+      const connected = new Set(this.ctx.getWebSockets().map((socket) => {
+        const attachment = socket.deserializeAttachment() as { userId?: string; spectator?: boolean } | null;
+        return attachment?.spectator ? null : attachment?.userId;
+      }));
+      return json({ count: state ? Object.values(state.players).filter((player) =>
+        player.alive && !player.phantom && connected.has(player.id)).length : 0 });
+    }
     if (path === '/socket') {
       if (request.headers.get('x-restart') === '1')
         this.restartUserId = (JSON.parse(request.headers.get('x-user') || '{}') as User).id;
