@@ -1,5 +1,5 @@
 import type { RoomData, RoomSummary } from '../types/replay';
-import { isRealtimeServerMessage, type DeathInput, type DirectionInput, type PauseInput, type RealtimeClientMessage, type StateInput } from '../../shared/realtime';
+import { isRealtimeServerMessage, type DeathInput, type DirectionInput, type PauseInput, type RealtimeClientMessage, type RoomSnapshot, type StateInput } from '../../shared/realtime';
 import type { SnakeAppearance } from '../../shared/appearance';
 export type RoomAction = 'initial' | 'resume' | 'restart' | 'next' | 'join' | 'spectate';
 
@@ -20,6 +20,7 @@ export class NetworkManager {
   private roomSeed: number | null = null;
   private roomIsSpectator = false;
   private roomIsRestarting = false;
+  private latestRoomSnapshot: RoomSnapshot | null = null;
   private readonly apiBase = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8787');
   private constructor() { if (typeof window !== 'undefined') { window.addEventListener('online', () => { this.emit('networkOnline'); this.reconnectRoom(); }); window.addEventListener('offline', () => { this.state='offline'; this.emit('networkOffline'); this.emit('connectionStateChange',this.state); }); } }
   static getInstance() { return this.instance ??= new NetworkManager(); }
@@ -28,13 +29,34 @@ export class NetworkManager {
   async updateUser(updates: Partial<UserData>) { if(!updates.settings)return; const result=await this.api<{user:UserData}>('/api/v1/me/settings',{method:'PATCH',body:JSON.stringify({settings:updates.settings})}); this.user=result.user;this.emit('userDataUpdated',this.user); }
   send(event:string,data?:any) { if(event==='room:join'){void this.requestRoom(data?.action ?? 'initial',data?.contextSeed);return;} if(this.socket?.readyState===WebSocket.OPEN)this.socket.send(JSON.stringify({v:1,type:event,id:crypto.randomUUID(),payload:data})); }
   async requestRoom(action:RoomAction, contextSeed?:number):Promise<RoomData> { const room=await this.api<RoomData>('/api/v1/matches',{method:'POST',body:JSON.stringify(action==='join'||action==='spectate'?{action,seed:contextSeed}:{action,contextSeed})}); console.log('[Network] Full phantom replay records received from server:', room.phantoms); this.roomSeed=room.seed; this.roomIsSpectator=action==='spectate'; this.roomIsRestarting=action==='restart'; this.openRoomSocket(room.seed,this.roomIsSpectator,this.roomIsRestarting); return room; }
+  waitForRoomState(seed: number, timeoutMs = 10000): Promise<RoomSnapshot> {
+    if (this.latestRoomSnapshot?.seed === seed) return Promise.resolve(this.latestRoomSnapshot);
+    return new Promise((resolve, reject) => {
+      const onState = (snapshot: RoomSnapshot) => {
+        if (snapshot.seed !== seed) return;
+        cleanup();
+        resolve(snapshot);
+      };
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        this.off('room.state', onState);
+      };
+      const timeout = window.setTimeout(() => {
+        cleanup();
+        reject(new Error('Timed out waiting for the room state. Try again.'));
+      }, timeoutMs);
+      this.on('room.state', onState);
+      // A message may arrive between the first check and listener registration.
+      if (this.latestRoomSnapshot?.seed === seed) onState(this.latestRoomSnapshot);
+    });
+  }
   requestRooms():Promise<RoomSummary[]> { return this.api<RoomSummary[]>('/api/v1/rooms'); }
   requestEnterRoom():Promise<{seed:number}> { return this.api<{seed:number}>('/api/v1/rooms/enter'); }
   requestRoomStats():Promise<{phantoms:number;rooms:number;playersOnline:number}> { return this.api('/api/v1/rooms/stats'); }
   createRoom():Promise<{seed:number}> { return this.api<{seed:number}>('/api/v1/rooms',{method:'POST',body:'{}'}); }
   deleteRoom(seed:number):Promise<{deleted:boolean;seed:number}> { return this.api<{deleted:boolean;seed:number}>(`/api/v1/rooms/${seed}`,{method:'DELETE'}); }
   requestLeaderboard() { void this.api<any[]>('/api/v1/leaderboard?limit=50').then(data=>this.emit('leaderboard:data',data)).catch(()=>this.emit('leaderboard:error',{message:'Failed to load leaderboard'})); }
-  private openRoomSocket(seed:number, spectating=false, restarting=false) { const previous=this.socket; if(this.heartbeat!==null)window.clearInterval(this.heartbeat); this.heartbeat=null; const url=new URL(`${this.apiBase}/api/v1/rooms/${seed}/socket`);if(spectating)url.searchParams.set('spectator','1');if(restarting)url.searchParams.set('restart','1');url.protocol=url.protocol==='https:'?'wss:':'ws:'; const socket=this.socket=new WebSocket(url); previous?.close(); socket.onopen=()=>{if(this.socket!==socket)return;this.retries=0;this.roomIsRestarting=false;this.sendRealtime({v:2,type:'room.resync'});this.heartbeat=window.setInterval(()=>this.sendRealtime({v:2,type:'ping'}),15000);this.emit('roomSocketConnected');}; socket.onmessage=(event)=>{if(this.socket!==socket)return;try{const message:unknown=JSON.parse(event.data);if(isRealtimeServerMessage(message)){console.log(`[Network] Server event: ${message.type}`, 'payload' in message ? message.payload : message);this.emit(message.type,'payload' in message?message.payload:message);}}catch(error){console.warn('[Network] Invalid server message:',event.data,error);}}; socket.onclose=()=>{if(this.socket!==socket)return;if(this.heartbeat!==null)window.clearInterval(this.heartbeat);this.heartbeat=null;this.scheduleReconnect();}; socket.onerror=()=>socket.close(); }
+  private openRoomSocket(seed:number, spectating=false, restarting=false) { const previous=this.socket; this.latestRoomSnapshot=null; if(this.heartbeat!==null)window.clearInterval(this.heartbeat); this.heartbeat=null; const url=new URL(`${this.apiBase}/api/v1/rooms/${seed}/socket`);if(spectating)url.searchParams.set('spectator','1');if(restarting)url.searchParams.set('restart','1');url.protocol=url.protocol==='https:'?'wss:':'ws:'; const socket=this.socket=new WebSocket(url); previous?.close(); socket.onopen=()=>{if(this.socket!==socket)return;this.retries=0;this.roomIsRestarting=false;this.sendRealtime({v:2,type:'room.resync'});this.heartbeat=window.setInterval(()=>this.sendRealtime({v:2,type:'ping'}),15000);this.emit('roomSocketConnected');}; socket.onmessage=(event)=>{if(this.socket!==socket)return;try{const message:unknown=JSON.parse(event.data);if(isRealtimeServerMessage(message)){console.log(`[Network] Server event: ${message.type}`, 'payload' in message ? message.payload : message);if(message.type==='room.state')this.latestRoomSnapshot=message.payload;this.emit(message.type,'payload' in message?message.payload:message);}}catch(error){console.warn('[Network] Invalid server message:',event.data,error);}}; socket.onclose=()=>{if(this.socket!==socket)return;if(this.heartbeat!==null)window.clearInterval(this.heartbeat);this.heartbeat=null;this.scheduleReconnect();}; socket.onerror=()=>socket.close(); }
   private sendRealtime(message: RealtimeClientMessage) { if(this.socket?.readyState===WebSocket.OPEN)this.socket.send(JSON.stringify(message)); }
   sendDirection(action: DirectionInput) { this.sendRealtime({v:2,type:'player.directionChanged',payload:{action}}); }
   sendPause(action: PauseInput) { this.sendRealtime({v:2,type:'player.pauseChanged',payload:{action}}); }

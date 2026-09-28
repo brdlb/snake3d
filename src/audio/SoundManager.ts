@@ -7,6 +7,7 @@ export class SoundManager {
     private sceneManager: SceneManager;
     private audioListener: THREE.AudioListener | null = null;
     private pickSound: THREE.Audio | undefined;
+    private pickBuffer: AudioBuffer | undefined;
     private stepSound: THREE.Audio | undefined;
     private gameOverSound: THREE.Audio | undefined;
     private humBuffers: AudioBuffer[] = [];
@@ -133,6 +134,7 @@ export class SoundManager {
             ]);
 
             this.pickSound = new THREE.Audio(this.audioListener);
+            this.pickBuffer = pickBuffer;
             this.pickSound.setBuffer(pickBuffer);
             this.pickSound.setVolume(this.settings.audioConfig.volume);
 
@@ -197,6 +199,32 @@ export class SoundManager {
             this.pickSound.setVolume(this.settings.audioConfig.volume);
             this.pickSound.play();
         }
+    }
+
+    public playPickAt(position: THREE.Vector3) {
+        if (!this.audioListener || !this.pickBuffer) return;
+        const context = this.audioListener.context;
+        const source = context.createBufferSource();
+        const panner = context.createPanner();
+        const gain = context.createGain();
+        source.buffer = this.pickBuffer;
+        panner.panningModel = 'HRTF';
+        panner.distanceModel = 'inverse';
+        panner.refDistance = this.settings.audioConfig.foodSoundRadius;
+        panner.rolloffFactor = 1;
+        panner.positionX.value = position.x;
+        panner.positionY.value = position.y;
+        panner.positionZ.value = position.z;
+        gain.gain.value = this.settings.audioConfig.volume;
+        source.connect(panner);
+        panner.connect(gain);
+        gain.connect(this.audioListener.getInput());
+        source.onended = () => {
+            source.disconnect();
+            panner.disconnect();
+            gain.disconnect();
+        };
+        source.start();
     }
 
     public playStep(playbackRate: number = 1.0) {

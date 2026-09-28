@@ -24,6 +24,7 @@ export type StateInput = SnakeState & {
   seq: number;
   step: number;
   reason: 'food' | 'speed' | 'reconnect' | 'spawn' | 'spectator-sync';
+  eatenFood?: Axis;
 };
 
 export type PauseInput = SnakeState & {
@@ -59,6 +60,7 @@ export type PlayerStateChanged = SnakeState & {
   seq: number;
   step: number;
   reason: StateInput['reason'];
+  eatenFood?: Axis;
   serverTime: number;
 };
 

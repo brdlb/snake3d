@@ -154,6 +154,8 @@ function stateInput(value: unknown): value is StateInput {
     action.type === 'state' &&
     sequence(action.seq) &&
     sequence(action.step) &&
+    (action.eatenFood === undefined ||
+      (action.reason === 'food' && position(action.eatenFood))) &&
     (action.reason === 'food' ||
       action.reason === 'speed' ||
       action.reason === 'reconnect' ||
@@ -1224,6 +1226,7 @@ export class RoomDurableObject {
               seq: action.seq,
               step: action.step,
               reason: action.reason,
+              eatenFood: action.eatenFood,
               serverTime: Date.now(),
             },
           },

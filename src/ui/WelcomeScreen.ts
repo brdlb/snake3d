@@ -98,6 +98,14 @@ export class WelcomeScreen {
         }
     }
 
+    public hide(): void {
+        this.container.classList.remove('active');
+    }
+
+    public show(): void {
+        this.container.classList.add('active');
+    }
+
     public dispose(): void {
         if (this.statsRefresh !== null) window.clearInterval(this.statsRefresh);
         this.container.remove();

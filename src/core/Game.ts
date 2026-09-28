@@ -66,6 +66,7 @@ export class Game {
   private hud: GameHUD;
   private miniMap: MiniMap;
   private welcomeScreen: WelcomeScreen | null = null;
+  private settingsReturnScreen: 'welcome' | 'pause' = 'pause';
   private leaderboardUI: LeaderboardUI;
   private soundManager!: SoundManager;
   private pathfinder!: Pathfinder;
@@ -127,6 +128,7 @@ export class Game {
   private deadLivePhantoms = new Set<string>();
   private localEntityId: string | null = null;
   private phantomMesh: THREE.InstancedMesh | null = null;
+  private livePlayerMesh: THREE.InstancedMesh | null = null;
   private replayRecorder: ReplayRecorder | null = null;
   private networkManager: NetworkManager;
   private currentSeed: number = 0;
@@ -240,7 +242,10 @@ export class Game {
       () => {
         // On Close Callback
         this.settingsUI.hide();
-        if (document.getElementById('welcome-screen')) return;
+        if (this.settingsReturnScreen === 'welcome') {
+          this.welcomeScreen?.show();
+          return;
+        }
         this.hud.togglePauseButton(true);
         this.pauseUI.show();
       },
@@ -266,6 +271,7 @@ export class Game {
       () => this.togglePause(),
       () => {
         // When opening settings:
+        this.settingsReturnScreen = 'pause';
         this.pauseUI.hide(); // Hide Pause UI
         this.hud.togglePauseButton(false); // Hide Pause Button
         this.settingsUI.show(); // Show Settings
@@ -348,9 +354,9 @@ export class Game {
       if (this.liveWorld && !this.isSpectating)
         this.isPaused ? this.sendLivePause() : this.sendLivePlayerState('reconnect');
     });
-    this.networkManager.on('room.state', (snapshot: RoomSnapshot) =>
-      this.applyLiveSnapshot(snapshot),
-    );
+    this.networkManager.on('room.state', (snapshot: RoomSnapshot) => {
+      if (!this.isRoomTransitionPending) this.applyLiveSnapshot(snapshot);
+    });
     this.networkManager.on('room.syncRequested', () => {
       if (this.liveWorld && !this.isSpectating) this.sendLivePlayerState('spectator-sync');
     });
@@ -441,7 +447,7 @@ export class Game {
       this.welcomeScreen = new WelcomeScreen(
         (mode, roomSeed) => this.handleGameStart(mode, roomSeed),
         () => this.leaderboardUI.show(),
-        () => this.settingsUI.show(),
+        () => this.openWelcomeSettings(),
       );
       if (new URLSearchParams(window.location.search).get('room') === null) {
         this.initialSpectatorPromise = this.handleGameStart('spectator');
@@ -579,6 +585,10 @@ export class Game {
     this.phantomMesh.count = 0;
     this.phantomMesh.frustumCulled = false;
     this.sceneManager.scene.add(this.phantomMesh);
+    this.livePlayerMesh = createSnakePatternMesh(10000, texture);
+    this.livePlayerMesh.count = 0;
+    this.livePlayerMesh.frustumCulled = false;
+    this.sceneManager.scene.add(this.livePlayerMesh);
     this.playfieldInitialized = true;
   }
 
@@ -1043,6 +1053,8 @@ export class Game {
       this.networkManager.requestResync();
       return;
     }
+    if (change.reason === 'food' && change.eatenFood)
+      this.soundManager.playPickAt(new THREE.Vector3(change.eatenFood.x, change.eatenFood.y, change.eatenFood.z));
     opponent.segments = change.segments.map(
       (position) => new THREE.Vector3(position.x, position.y, position.z),
     );
@@ -1089,12 +1101,14 @@ export class Game {
 
   private sendLivePlayerState(
     reason: 'food' | 'speed' | 'reconnect' | 'spawn' | 'spectator-sync',
+    eatenFood?: THREE.Vector3,
   ) {
     this.networkManager.sendPlayerState({
       type: 'state',
       seq: ++this.localStateSeq,
       step: this.playerTick,
       reason,
+      ...(eatenFood ? { eatenFood: this.positionData(eatenFood) } : {}),
       ...this.livePlayerState(),
     });
   }
@@ -1309,6 +1323,12 @@ export class Game {
     }
   }
 
+  private openWelcomeSettings(): void {
+    this.settingsReturnScreen = 'welcome';
+    this.welcomeScreen?.hide();
+    this.settingsUI.show();
+  }
+
   private pauseSnakes(): PauseSnake[] {
     return [
       {
@@ -1391,7 +1411,6 @@ export class Game {
 
   private update(delta: number) {
     this.time += delta;
-    if (!this.input.isActionPressed('boost')) this.restartKeyWasPressed = false;
 
     if (!this.playfieldInitialized) return;
 
@@ -1436,12 +1455,6 @@ export class Game {
       this.cameraController.update(delta, head, this.snake.direction, 0);
       this.particleSystem.update(delta);
 
-      // Consume Space: holding it must not start one restart per frame.
-      const restartPressed = this.input.isActionPressed('boost');
-      if (restartPressed && !this.restartKeyWasPressed) {
-        this.restartKeyWasPressed = true;
-        void this.resetGame('restart');
-      }
       return;
     }
 
@@ -1555,6 +1568,7 @@ export class Game {
           const phantomHead = phantom.getHead();
           const phantomFoodIndex = this.world.checkFoodCollision(phantomHead);
           if (phantomFoodIndex !== -1) {
+            this.soundManager.playPickAt(this.world.foodPositions[phantomFoodIndex]);
             // Determine effects based on food color (same as player)
             const foodColor = this.world.foodColors[phantomFoodIndex];
             const hex = foodColor.getHex();
@@ -1882,13 +1896,14 @@ export class Game {
         originIndex: 0,
       });
 
+      const eatenPosition = this.world.foodPositions[foodIndex].clone();
       this.world.respawnFood(
         this.snake.segments,
         foodIndex,
         true,
         this.phantoms.flatMap((phantom) => phantom.segments),
       );
-      if (this.liveWorld && !this.isGameOver) this.sendLivePlayerState('food');
+      if (this.liveWorld && !this.isGameOver) this.sendLivePlayerState('food', eatenPosition);
     }
   }
 
@@ -2043,7 +2058,7 @@ export class Game {
         this.welcomeScreen = new WelcomeScreen(
           (mode, roomSeed) => this.handleGameStart(mode, roomSeed),
           () => this.leaderboardUI.show(),
-          () => this.settingsUI.show(),
+          () => this.openWelcomeSettings(),
         );
       } catch (error) {
         console.warn('[Tutorial] Could not connect after local game over; staying offline:', error);
@@ -2116,14 +2131,13 @@ export class Game {
   }
 
   private isRoomTransitionPending: boolean = false;
-  private restartKeyWasPressed: boolean = false;
 
   private async resetGame(action: 'restart' | 'next') {
     if (this.isRoomTransitionPending) return;
     this.isRoomTransitionPending = true;
     this.gameOverUI.setLoading(true);
+    let room: RoomData | null = null;
     try {
-      let room: RoomData | null = null;
       if (this.networkManager.isConnected()) {
         try {
           room = await this.networkManager.requestRoom(action, this.currentSeed);
@@ -2134,12 +2148,9 @@ export class Game {
           );
         }
       }
-      this.gameOverUI.hide();
-      this.pauseUI.hide();
-      this.isGameOver = false;
-      this.isPaused = false;
-      this.hud.togglePauseButton(true);
-      this.hud.setVisibility(true);
+      // Keep Game Over visible until the new socket supplies the player's
+      // authoritative position. Starting earlier causes a visible snap.
+      const snapshot = room ? await this.networkManager.waitForRoomState(room.seed) : null;
 
       // Reset Stats
       this.gameStats = {
@@ -2171,12 +2182,22 @@ export class Game {
         this.selectedRoomSeed = room.seed;
         replaceRoomInAddress(room.seed);
         this.initializeRoom(room);
+        if (snapshot) this.applyLiveSnapshot(snapshot);
         this.cachePhantomsForOffline(room.phantoms);
       } else {
         // Offline mode - use cached phantoms or empty room
         await this.initializeOfflineRoom();
       }
+      this.gameOverUI.hide();
+      this.pauseUI.hide();
+      this.isGameOver = false;
+      this.isPaused = false;
+      this.hud.togglePauseButton(true);
+      this.hud.setVisibility(true);
     } catch (error) {
+      // The server may have assigned the room even if its socket timed out.
+      // Keep the next retry's context aligned with that assignment.
+      if (room) this.currentSeed = room.seed;
       this.gameOverUI.setLoading(
         false,
         error instanceof Error ? error.message : 'Could not start a new room. Try again.',
@@ -2259,9 +2280,10 @@ export class Game {
     this.snakeMesh.instanceMatrix.needsUpdate = true;
     markSnakePatternsUpdated(this.snakeMesh);
 
-    // Render Phantoms
-    if (this.phantomMesh) {
+    // Render phantoms and live players with their own opacity.
+    if (this.phantomMesh && this.livePlayerMesh) {
       let phantomInstanceIndex = 0;
+      let livePlayerInstanceIndex = 0;
 
       for (const phantom of this.phantoms) {
         // Dead phantoms stay visible on the field (they just stop moving)
@@ -2290,6 +2312,7 @@ export class Game {
         }
       }
       for (const opponent of this.liveOpponents) {
+        const mesh = opponent.phantom ? this.phantomMesh : this.livePlayerMesh;
         const renderableIndices = getRenderableSegmentIndices(
           opponent.segments,
           occupiedSnakePositions,
@@ -2300,15 +2323,18 @@ export class Game {
           if (segmentIndex === 0) this.dummy.quaternion.copy(opponent.direction);
           this.dummy.scale.set(1, 1, 1);
           this.dummy.updateMatrix();
-          this.phantomMesh.setMatrixAt(phantomInstanceIndex, this.dummy.matrix);
-          setSnakePatternAt(this.phantomMesh, phantomInstanceIndex, opponent.appearance);
-          phantomInstanceIndex++;
+          const instanceIndex = opponent.phantom ? phantomInstanceIndex++ : livePlayerInstanceIndex++;
+          mesh.setMatrixAt(instanceIndex, this.dummy.matrix);
+          setSnakePatternAt(mesh, instanceIndex, opponent.appearance);
         }
       }
 
       this.phantomMesh.count = phantomInstanceIndex;
       this.phantomMesh.instanceMatrix.needsUpdate = true;
       markSnakePatternsUpdated(this.phantomMesh);
+      this.livePlayerMesh.count = livePlayerInstanceIndex;
+      this.livePlayerMesh.instanceMatrix.needsUpdate = true;
+      markSnakePatternsUpdated(this.livePlayerMesh);
     }
 
     const spectatorTargets = this.isSpectating && this.spectatorCameraMode === 'follow'
