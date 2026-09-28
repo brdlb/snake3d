@@ -78,6 +78,9 @@ export class PauseUI {
     private createUI() {
         this.container = document.createElement('div');
         this.container.className = 'pause-screen';
+        const content = document.createElement('div');
+        content.className = 'pause-content';
+        this.container.appendChild(content);
 
         // 1. Title Panel
         const titlePanel = document.createElement('div');
@@ -194,9 +197,9 @@ export class PauseUI {
         this.resumeBtn.textContent = 'RESUME';
         this.resumeBtn.onclick = () => this.onResume();
 
-        this.container.appendChild(titlePanel);
-        this.container.appendChild(this.resumeBtn);
-        this.container.appendChild(this.settingsBtn);
+        content.appendChild(titlePanel);
+        content.appendChild(this.resumeBtn);
+        content.appendChild(this.settingsBtn);
         this.seedInput.onchange = () => this.commitAppearance();
         this.drawPattern();
 
@@ -214,7 +217,7 @@ export class PauseUI {
                 this.onOrientationLockChange?.(this.orientationLockInput!.checked);
 
             orientationPanel.append(orientationText, this.orientationLockInput);
-            this.container.appendChild(orientationPanel);
+            content.appendChild(orientationPanel);
         }
 
         // Leaderboard Button
@@ -222,9 +225,9 @@ export class PauseUI {
         leadersBtn.className = 'pause-panel menu-btn leaders-btn';
         leadersBtn.textContent = 'LEADERS';
         leadersBtn.onclick = () => this.onLeaderboard();
-        this.container.appendChild(leadersBtn);
-        this.container.appendChild(statsPanel);
-        this.container.appendChild(appearancePanel);
+        content.appendChild(leadersBtn);
+        content.appendChild(statsPanel);
+        content.appendChild(appearancePanel);
 
         document.body.appendChild(this.container);
 
