@@ -3,6 +3,7 @@ import { networkManager } from '../network/NetworkManager';
 export class WelcomeScreen {
     private container: HTMLDivElement;
     private entering = false;
+    private statsRefresh: number | null = null;
     private readonly invitedRoomSeed: number | null;
 
     constructor(
@@ -14,6 +15,8 @@ export class WelcomeScreen {
         this.invitedRoomSeed = room !== null && /^\d+$/.test(room) && Number.isSafeInteger(Number(room)) ? Number(room) : null;
         this.container = this.createUI();
         document.body.appendChild(this.container);
+        void this.loadStats();
+        this.statsRefresh = window.setInterval(() => void this.loadStats(), 15000);
     }
 
     private createUI(): HTMLDivElement {
@@ -44,8 +47,24 @@ export class WelcomeScreen {
             actions.appendChild(button);
         }
         content.appendChild(actions);
+        const stats = document.createElement('p');
+        stats.className = 'welcome-stats';
+        stats.setAttribute('aria-live', 'polite');
+        stats.textContent = 'PHANTOMS —  ·  ROOMS —  ·  PLAYERS ONLINE —';
+        content.appendChild(stats);
         container.appendChild(content);
         return container;
+    }
+
+    private async loadStats(): Promise<void> {
+        if (!networkManager.isConnected()) return;
+        try {
+            const { phantoms, rooms, playersOnline } = await networkManager.requestRoomStats();
+            const stats = this.container.querySelector<HTMLElement>('.welcome-stats');
+            if (stats) stats.textContent = `PHANTOMS ${phantoms}  ·  ROOMS ${rooms}  ·  PLAYERS ONLINE ${playersOnline}`;
+        } catch (error) {
+            console.warn('[Welcome] Unable to load room stats:', error);
+        }
     }
 
     private async handleEnter(): Promise<void> {
@@ -61,6 +80,7 @@ export class WelcomeScreen {
             this.container.classList.add('hiding');
             await new Promise<void>((resolve) => setTimeout(resolve, 600));
             await this.onStart('player', seed);
+            if (this.statsRefresh !== null) window.clearInterval(this.statsRefresh);
             this.container.remove();
         } catch (error) {
             console.error('[Welcome] Unable to enter the room:', error);
@@ -79,6 +99,7 @@ export class WelcomeScreen {
     }
 
     public dispose(): void {
+        if (this.statsRefresh !== null) window.clearInterval(this.statsRefresh);
         this.container.remove();
     }
 }

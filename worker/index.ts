@@ -379,16 +379,37 @@ export default {
       );
     }
     if (path === '/api/v1/rooms/enter' && request.method === 'GET') {
-      const rows = await env.DB.prepare('SELECT seed FROM rooms').all<{ seed: number }>();
+      const rows = await env.DB.prepare(
+        'SELECT r.seed, EXISTS(SELECT 1 FROM replays p WHERE p.room_seed=r.seed) AS has_record FROM rooms r',
+      ).all<{ seed: number; has_record: number }>();
       if (rows.results.length === 0) return json({ seed: await createRoomSeed(env, user) }, 200, requestId);
       const counts = await Promise.all(rows.results.map(async (row) => {
         const seed = Number(row.seed);
         const response = await env.ROOMS.get(env.ROOMS.idFromName(String(seed))).fetch('https://room/occupancy');
-        return { seed, count: (await response.json<{ count: number }>()).count };
+        return { seed, count: (await response.json<{ count: number }>()).count, hasRecord: Boolean(row.has_record) };
       }));
       const most = Math.max(...counts.map((room) => room.count));
-      const choices = counts.filter((room) => room.count === most);
+      if (most === 0 && !counts.some((room) => room.hasRecord))
+        return json({ seed: await createRoomSeed(env, user) }, 200, requestId);
+      const choices = most > 0
+        ? counts.filter((room) => room.count === most)
+        : counts.filter((room) => room.hasRecord);
       return json({ seed: choices[Math.floor(Math.random() * choices.length)].seed }, 200, requestId);
+    }
+    if (path === '/api/v1/rooms/stats' && request.method === 'GET') {
+      const totals = await env.DB.prepare(
+        'SELECT (SELECT COUNT(*) FROM rooms) AS rooms, (SELECT COUNT(*) FROM replays) AS phantoms',
+      ).first<{ rooms: number; phantoms: number }>();
+      const seeds = await env.DB.prepare('SELECT seed FROM rooms').all<{ seed: number }>();
+      const occupancy = await Promise.all(seeds.results.map(async ({ seed }) => {
+        const response = await env.ROOMS.get(env.ROOMS.idFromName(String(seed))).fetch('https://room/occupancy');
+        return (await response.json<{ count: number }>()).count;
+      }));
+      return json({
+        phantoms: Number(totals?.phantoms ?? 0),
+        rooms: Number(totals?.rooms ?? 0),
+        playersOnline: occupancy.reduce((sum, count) => sum + count, 0),
+      }, 200, requestId);
     }
     if (path === '/api/v1/rooms' && request.method === 'POST') {
       return json({ seed: await createRoomSeed(env, user) }, 201, requestId);
