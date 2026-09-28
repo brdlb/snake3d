@@ -33,11 +33,26 @@ export class WelcomeScreen {
         const content = document.createElement('div');
         content.className = 'welcome-content';
 
+        const eyebrow = document.createElement('div');
+        eyebrow.className = 'screen-eyebrow';
+        eyebrow.textContent = '01 — TITLE SCREEN';
+        content.appendChild(eyebrow);
+
+        const system = document.createElement('div');
+        system.className = 'welcome-system';
+        system.innerHTML = '<span>SNAKE ON CUBE<br>SYS:// ACTIVE</span><span>3D RECURSIVE ARCADE<br>FEED TO GROW</span>';
+        content.appendChild(system);
+
         // Logo / Title
         const title = document.createElement('h1');
         title.className = 'welcome-title';
-        title.textContent = 'SNAKE 3D';
+        title.textContent = 'SNAKE_';
         content.appendChild(title);
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'welcome-tagline';
+        subtitle.textContent = 'A 3D RECURSIVE ARCADE // FEED TO GROW';
+        content.appendChild(subtitle);
 
         if (this.invitedRoomSeed !== null) {
             const message = document.createElement('p');

@@ -84,7 +84,7 @@ export class PauseUI {
         titlePanel.className = 'pause-panel title-panel';
         const title = document.createElement('h1');
         title.className = 'pause-title';
-        title.textContent = 'PAUSE';
+        title.textContent = 'PAUSED';
         titlePanel.appendChild(title);
 
         this.roomEl = document.createElement('button');
@@ -195,8 +195,7 @@ export class PauseUI {
         this.resumeBtn.onclick = () => this.onResume();
 
         this.container.appendChild(titlePanel);
-        this.container.appendChild(appearancePanel);
-        this.container.appendChild(statsPanel);
+        this.container.appendChild(this.resumeBtn);
         this.container.appendChild(this.settingsBtn);
         this.seedInput.onchange = () => this.commitAppearance();
         this.drawPattern();
@@ -224,8 +223,8 @@ export class PauseUI {
         leadersBtn.textContent = 'LEADERS';
         leadersBtn.onclick = () => this.onLeaderboard();
         this.container.appendChild(leadersBtn);
-
-        this.container.appendChild(this.resumeBtn);
+        this.container.appendChild(statsPanel);
+        this.container.appendChild(appearancePanel);
 
         document.body.appendChild(this.container);
 

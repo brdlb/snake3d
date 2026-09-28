@@ -107,8 +107,6 @@ export class GameOverUI {
         const leadersBtn = document.createElement('button');
         leadersBtn.className = 'restart-btn leaders-btn';
         leadersBtn.textContent = 'LEADERBOARD';
-        leadersBtn.style.borderRightColor = '#0088ff';
-        leadersBtn.style.color = '#0088ff';
         // Delay leaderboard button appearance
         leadersBtn.style.transitionDelay = '0.2s';
 
