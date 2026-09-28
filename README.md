@@ -1,121 +1,96 @@
-# Snake3D Refactored
+# Snake3D
 
-Modern implementation of the classic Snake 3D game using TypeScript, Three.js, and Vite with multiplayer support.
+A browser-based 3D Snake game built with TypeScript, Three.js, and Vite. The current online runtime is a Cloudflare Worker with D1 for persistent data and a Durable Object with native WebSockets for each live room.
 
-## Features
+## What you can play
 
-- 🎮 Classic Snake 3D gameplay
-- 🌐 Multiplayer support via Socket.IO
-- 👤 User authentication and persistent profiles
-- 📊 High scores and statistics tracking
-- 🎨 Modern graphics with Three.js
-- 📱 Responsive design
+- Move through a 3D arena, collect three kinds of food, grow, and change speed.
+- Complete the first-run tutorial; restart it from Settings.
+- Create or select a room, share its `?room=<seed>` link, and play alongside other players.
+- Enter an invited room as a player or a spectator. Spectators can use a free camera or follow a snake.
+- Encounter replay-based phantom snakes, compare room records, and view the leaderboard.
+- Play locally when the online service is unavailable. Offline results and previously cached phantoms are stored in the browser.
+- Customize the snake's appearance and audio and display settings.
 
-## Prerequisites
+## Requirements
 
-- Node.js (v18 or higher recommended)
-- npm (comes with Node.js)
+- Node.js and npm compatible with the versions of Vite and Wrangler in `package.json`.
+- A browser with WebGL support.
+- A Cloudflare account and a configured D1 database only if you plan to deploy your own online instance.
 
-## Getting Started
+Install dependencies from the repository root:
 
-### Local Development (Single Player)
-
-1.  **Navigate to the project directory:**
-    ```bash
-    cd snake3d
-    ```
-
-2.  **Install dependencies:**
-    ```bash
-    npm install
-    ```
-
-3.  **Start the development server:**
-    ```bash
-    npm run dev
-    ```
-    Open your browser and navigate to the URL shown in the terminal (usually `http://localhost:5173`).
-
-### Local Development (Multiplayer)
-
-To enable multiplayer features, you need to run both the frontend and the Socket.IO server:
-
-1.  **Install dependencies** (if not already done):
-    ```bash
-    npm install
-    ```
-
-2.  **Start both servers:**
-    ```bash
-    npm run dev:all
-    ```
-    This will start:
-    - Frontend dev server on `http://localhost:5173`
-    - Socket.IO server on `http://localhost:3000`
-
-Alternatively, you can run them separately in different terminals:
 ```bash
-# Terminal 1 - Frontend
-npm run dev
-
-# Terminal 2 - Server
-npm run server
+npm install
 ```
 
-## Build for Production
+## Local development
 
-To create an optimized production build:
+### Game client and offline play
+
+```bash
+npm run dev
+```
+
+Open the URL printed by Vite, usually `http://localhost:5173`. This starts the client only. The client tries the API at `http://localhost:8787` in development and falls back to offline play if it cannot connect. A new browser profile starts with the tutorial.
+
+### Online rooms on a local Worker
+
+The Worker serves both the built client and the API from one origin. Build the client and initialize the local D1 database before starting it:
 
 ```bash
 npm run build
+npx wrangler d1 migrations apply snake3d --local
+npm run cf:dev
 ```
 
-The output will be in the `dist` directory. You can preview the production build locally using:
+Open the URL printed by Wrangler, usually `http://localhost:8787`. Use separate browser profiles or browsers to test multiple players, since a profile keeps its own session cookie. You can share a room by opening its `?room=<seed>` URL in another profile.
 
-```bash
-npm run preview
-```
+After editing client code, run `npm run build` again so the Worker serves the updated `dist` assets. Wrangler handles Worker code changes during local development.
+
+`VITE_API_URL` can override the API base URL for a separately hosted client. The default is `http://localhost:8787` during Vite development and the page's origin in a production build. The current Worker does not provide cross-origin API responses, so use the same-origin Worker URL for local online play.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the Vite client development server. |
+| `npm run build` | Type-check and build the client into `dist/`. |
+| `npm run preview` | Preview the built client without the Worker API. |
+| `npm run cf:dev` | Start the local Cloudflare Worker and serve `dist/`. |
+| `npm run cf:test` | Run the Vitest suite. |
+| `npm run lint` | Run ESLint. |
+| `npm run cf:migrate` | Apply D1 migrations to the configured **remote** database. |
+| `npm run cf:deploy` | Deploy the Worker and built assets to Cloudflare. |
+
+## Online architecture
+
+`worker/index.ts` serves the built assets and the `/api/v1` HTTP API. An automatic cookie-based guest session identifies each player. D1 stores users, rooms, records, and saved replays. A Durable Object holds each room's live state and relays WebSocket events to players and spectators. The browser runs the game simulation and sends direction and state checkpoints; other clients animate players between those checkpoints. Saved replays become phantom snakes in later runs.
+
+The server checks message structure and some movement rules, but it currently accepts client-reported positions, speed, and score. Treat room records and leaderboard results as casual-game results, not cheat-resistant rankings.
 
 ## Deployment
 
-This project uses a split deployment architecture:
-- **Frontend:** Cloudflare Pages (static assets)
-- **Backend:** Railway/Render/etc. (Socket.IO server)
+`wrangler.jsonc` defines the Worker, its `DB` D1 binding, the `ROOMS` Durable Object binding, built asset directory, and custom-domain route. To deploy to your own Cloudflare account, configure the D1 database and route for that account first. Then build, apply the **remote** migrations, and deploy:
 
-### Quick Deployment Guide
-
-1. **Deploy the Socket.IO server** first:
-   - See [SERVER_DEPLOYMENT.md](./SERVER_DEPLOYMENT.md) for detailed instructions
-   - Recommended platforms: Railway, Render, or Glitch
-   - Copy the deployed server URL
-
-2. **Deploy the frontend** to Cloudflare Pages:
-   - See [CLOUDFLARE_PAGES.md](./CLOUDFLARE_PAGES.md) for detailed instructions
-   - Set `VITE_SOCKET_SERVER_URL` environment variable to your server URL
-   - Deploy via GitHub integration or Wrangler CLI
-
-## Project Structure
-
-- `src/main.ts`: Application entry point and Three.js scene setup
-- `src/network/`: Socket.IO client and network management
-- `src/style.css`: Global styles
-- `server/`: Socket.IO server and authentication
-- `public/`: Static assets (textures, fonts)
-- `index.html`: Main HTML template
-
-## Environment Variables
-
-Create a `.env` file in the root directory (see `.env.example`):
-
-```env
-VITE_SOCKET_SERVER_URL=http://localhost:3000
+```bash
+npm run build
+npm run cf:migrate
+npm run cf:deploy
 ```
 
-For production, set this to your deployed server URL.
+The migration and deploy commands change remote Cloudflare resources. `npm run preview` is only a static preview; it does not provide online rooms.
 
-## Documentation
+## Project map
 
-- [Server Deployment Guide](./SERVER_DEPLOYMENT.md) - How to deploy the Socket.IO server
-- [Cloudflare Pages Guide](./CLOUDFLARE_PAGES.md) - How to deploy the frontend
-- [Game Development Notes](./gamedev.md) - Development notes and ideas
+- `src/main.ts` and `src/core/Game.ts`: startup, tutorial, gameplay, rendering integration, and room events.
+- `src/network/NetworkManager.ts`: HTTP session and room API, WebSocket connection and events.
+- `src/entities/` and `src/graphics/`: snakes, food world, phantoms, and Three.js rendering.
+- `src/ui/`: room browser, HUD, leaderboard, settings, pause, and spectator UI.
+- `shared/`: appearance types, realtime protocol, and simulation rules shared with the Worker.
+- `worker/index.ts`: Cloudflare API and `RoomDurableObject`.
+- `migrations/`: D1 schema migrations.
+- `public/`: service worker, web manifest, fonts, images, and audio assets.
+- `specs/`: design and workflow notes; check the code for the current behavior.
 
+Older files under `server/`, plus `QUICK_START.md`, `SERVER_DEPLOYMENT.md`, `RENDER_DEPLOYMENT_GUIDE.md`, and `.env.example`, describe the previous Socket.IO deployment. They are not used by the commands above.
