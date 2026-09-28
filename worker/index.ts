@@ -1222,7 +1222,17 @@ export class RoomDurableObject {
         };
       if (event?.type === 'player.died' && typeof event.payload?.action?.submissionId === 'string')
         deathContext = { seed: attachment.seed, submissionId: event.payload.action.submissionId };
-      if (event?.v !== 2) throw new Error();
+      if (event?.v !== 2) {
+        if (deathContext) {
+          await this.saveStage(attachment.seed, attachment.userId, deathContext.submissionId, 'rejected', 'INVALID_PROTOCOL_VERSION');
+          ws.send(JSON.stringify({ v: 2, type: 'game.saveFailed', payload: {
+            submissionId: deathContext.submissionId, code: 'INVALID_PROTOCOL_VERSION', retryable: false,
+          } }));
+        } else {
+          ws.send(JSON.stringify({ v: 2, type: 'error', payload: { code: 'INVALID_PROTOCOL_VERSION' } }));
+        }
+        return;
+      }
       if (event.type === 'ping') {
         ws.send(JSON.stringify({ v: 2, type: 'pong' }));
         return;
@@ -1232,7 +1242,17 @@ export class RoomDurableObject {
         ws.send(JSON.stringify({ v: 2, type: 'room.state', payload: this.snapshot(state) }));
         return;
       }
-      if (attachment.spectator) throw new Error();
+      if (attachment.spectator) {
+        if (deathContext) {
+          await this.saveStage(attachment.seed, attachment.userId, deathContext.submissionId, 'rejected', 'SPECTATOR_CANNOT_SAVE');
+          ws.send(JSON.stringify({ v: 2, type: 'game.saveFailed', payload: {
+            submissionId: deathContext.submissionId, code: 'SPECTATOR_CANNOT_SAVE', retryable: false,
+          } }));
+        } else {
+          ws.send(JSON.stringify({ v: 2, type: 'error', payload: { code: 'SPECTATOR_READ_ONLY' } }));
+        }
+        return;
+      }
       const action = 'payload' in event && 'action' in event.payload ? event.payload.action : undefined;
       const deathSubmissionId = event.type === 'player.died' && action && typeof action === 'object' &&
         'submissionId' in action && typeof action.submissionId === 'string' ? action.submissionId : null;
@@ -1464,7 +1484,8 @@ export class RoomDurableObject {
       );
     } catch (error) {
       if (deathContext) {
-        console.error(JSON.stringify({ event: 'game.saveError', ...deathContext, error: String(error) }));
+        console.error(JSON.stringify({ event: 'game.saveError', ...deathContext,
+          error: String(error), stack: error instanceof Error ? error.stack : undefined }));
         ws.send(JSON.stringify({ v: 2, type: 'game.saveFailed', payload: {
           submissionId: deathContext.submissionId, code: 'PROCESSING_FAILED', retryable: true,
         } }));

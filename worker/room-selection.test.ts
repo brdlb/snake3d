@@ -466,6 +466,17 @@ describe('terminal save diagnostics', () => {
     });
   });
 
+  it('identifies a death sent through a spectator socket', async () => {
+    const { sender, submit } = setup();
+    sender.deserializeAttachment = () => ({
+      userId: 'player-1', entityId: 'entity-1', seed: 123, instanceId: 'connection-1', spectator: true,
+    });
+    await submit(1);
+    expect(JSON.parse(sender.send.mock.lastCall![0])).toMatchObject({
+      type: 'game.saveFailed', payload: { code: 'SPECTATOR_CANNOT_SAVE', retryable: false },
+    });
+  });
+
   it('records a terminal and allows an idempotent retry after a save failure', async () => {
     const { player, sender, object, records, submit } = setup();
     const save = vi.fn().mockRejectedValueOnce(new Error('D1 unavailable'))
