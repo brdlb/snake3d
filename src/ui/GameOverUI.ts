@@ -297,7 +297,15 @@ export class GameOverUI {
         requestAnimationFrame(() => this.updateScale());
     }
 
+    public setSavePending(submissionId: string) {
+        this.setLoading(true);
+        this.retrySaveBtn.hidden = false;
+        this.saveStatusEl.hidden = false;
+        this.saveStatusEl.textContent = `SAVE ID: ${submissionId.toUpperCase()}`;
+    }
+
     public setSaveStatus(message: string) {
+        this.retrySaveBtn.hidden = true;
         this.saveStatusEl.hidden = false;
         this.saveStatusEl.textContent = message;
         requestAnimationFrame(() => this.updateScale());

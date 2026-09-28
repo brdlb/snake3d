@@ -266,7 +266,7 @@ export class Game {
       () => this.leaderboardUI.show(),
       () => {
         if (!this.pendingDeathAction) return;
-        this.gameOverUI.setLoading(true);
+        this.gameOverUI.setSavePending(this.pendingDeathAction.submissionId);
         if (!this.networkManager.sendPlayerDeath(this.pendingDeathAction))
           this.gameOverUI.showSaveFailure(this.pendingDeathAction.submissionId, 'SOCKET_UNAVAILABLE', true);
       },
@@ -2091,7 +2091,6 @@ export class Game {
     if (reason && this.liveWorld) {
       // The restart assignment reads replays from D1, so wait until the
       // WebSocket death handler has committed this run.
-      this.gameOverUI.setLoading(true);
       this.pendingDeathAction = {
         type: 'death',
         submissionId: crypto.randomUUID(),
@@ -2100,6 +2099,7 @@ export class Game {
         reason,
         ...this.livePlayerState(),
       };
+      this.gameOverUI.setSavePending(this.pendingDeathAction.submissionId);
       if (!this.networkManager.sendPlayerDeath(this.pendingDeathAction))
         this.gameOverUI.showSaveFailure(this.pendingDeathAction.submissionId, 'SOCKET_UNAVAILABLE', true);
     }
