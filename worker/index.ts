@@ -415,6 +415,17 @@ export default {
         playersOnline: occupancy.reduce((sum, count) => sum + count, 0),
       }, 200, requestId);
     }
+    if (path === '/api/v1/rooms/encounters' && request.method === 'GET') {
+      const totals = await env.DB.prepare(
+        'SELECT room_seed AS seed, COUNT(*) AS encounters, COUNT(DISTINCT user_a_id || char(0) || user_b_id) AS uniquePairs FROM live_player_encounters GROUP BY room_seed ORDER BY encounters DESC, room_seed',
+      ).all<{ seed: number; encounters: number; uniquePairs: number }>();
+      return json({
+        totalEncounters: totals.results.reduce((sum, row) => sum + Number(row.encounters), 0),
+        rooms: totals.results.map((row) => ({
+          seed: Number(row.seed), encounters: Number(row.encounters), uniquePairs: Number(row.uniquePairs),
+        })),
+      }, 200, requestId);
+    }
     if (path === '/api/v1/rooms' && request.method === 'POST') {
       return json({ seed: await createRoomSeed(env, user) }, 201, requestId);
     }
@@ -540,6 +551,26 @@ export class RoomDurableObject {
   private simulation: SimulationState | null = null;
   private restartUserId: string | null = null;
   private lastSpectatorSyncRequestAt = 0;
+  private async recordLiveEncounters(seed: number, userId: string, state: SimulationState) {
+    const connectedPeers = new Set<string>();
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = socket.deserializeAttachment() as { userId?: string; spectator?: boolean } | null;
+      if (attachment?.userId && attachment.userId !== userId && !attachment.spectator)
+        connectedPeers.add(attachment.userId);
+    }
+    for (const peerId of connectedPeers) {
+      const peer = Object.values(state.players).find((candidate) =>
+        candidate.id === peerId && candidate.alive && !candidate.phantom);
+      if (!peer) continue;
+      const [a, b] = [userId, peerId].sort();
+      const key = `encounter:${a}:${b}`;
+      if (await this.ctx.storage.get(key)) continue;
+      await this.env.DB.prepare(
+        'INSERT INTO live_player_encounters(id,room_seed,user_a_id,user_b_id,met_at) VALUES(?,?,?,?,?)',
+      ).bind(crypto.randomUUID(), seed, a, b, now()).run();
+      await this.ctx.storage.put(key, true);
+    }
+  }
   private async saveStage(seed: number, userId: string, submissionId: string, stage: string, code?: string) {
     const trace = { seed, submissionId, stage, code, at: now() };
     console.log(JSON.stringify({ event: 'game.save', ...trace }));
@@ -1191,6 +1222,10 @@ export class RoomDurableObject {
       spectator,
       instanceId: player?.instanceId,
     });
+    if (!spectator) {
+      try { await this.recordLiveEncounters(seed, user.id, state); }
+      catch (error) { console.error('Failed to record live player encounter', error); }
+    }
     server.send(JSON.stringify({ v: 2, type: 'room.state', payload: this.snapshot(state) }));
     if (spectator) this.requestSpectatorSync();
     if (playerJoined)
@@ -1521,6 +1556,18 @@ export class RoomDurableObject {
       });
     }
     ws.close();
+    if (attachment && !attachment.spectator) {
+      const stillConnected = this.ctx.getWebSockets().some((socket) => {
+        if (socket === ws) return false;
+        const other = socket.deserializeAttachment() as { userId?: string; spectator?: boolean } | null;
+        return other?.userId === attachment.userId && !other.spectator;
+      });
+      if (!stillConnected) {
+        const encounters = await this.ctx.storage.list({ prefix: 'encounter:' });
+        for (const key of encounters.keys())
+          if (key.split(':').slice(1).includes(attachment.userId)) await this.ctx.storage.delete(key);
+      }
+    }
     this.presence();
   }
   private presence() {

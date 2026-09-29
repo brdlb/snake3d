@@ -425,6 +425,33 @@ describe('room state preparation', () => {
   });
 });
 
+describe('live player encounters', () => {
+  it('records one meeting per connected pair and ignores spectators and phantoms', async () => {
+    const state = createSimulation(123);
+    addPlayer(state, 'peer', 'Peer', 0, { entityId: 'peer-entity' });
+    const records = new Map<string, unknown>();
+    const storage = {
+      get: vi.fn(async (key: string) => records.get(key)),
+      put: vi.fn(async (key: string, value: unknown) => { records.set(key, value); }),
+    };
+    const run = vi.fn(async () => ({}));
+    const prepare = vi.fn(() => ({ bind: () => ({ run }) }));
+    const sockets = [
+      { deserializeAttachment: () => ({ userId: 'peer', spectator: false }) },
+      { deserializeAttachment: () => ({ userId: 'watcher', spectator: true }) },
+    ];
+    const object = new RoomDurableObject(
+      { storage, getWebSockets: () => sockets } as any,
+      { DB: { prepare } } as any,
+    );
+    await (object as any).recordLiveEncounters(123, 'visitor', state);
+    await (object as any).recordLiveEncounters(123, 'visitor', state);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(records.has('encounter:peer:visitor')).toBe(true);
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO live_player_encounters'));
+  });
+});
+
 describe('terminal save diagnostics', () => {
   it('accepts a fresh state sequence after reconnecting a living player', async () => {
     const state = createSimulation(123);
