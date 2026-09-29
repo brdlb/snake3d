@@ -1167,6 +1167,10 @@ export class RoomDurableObject {
         playerJoined = true;
       } else {
         player.instanceId = connectionId;
+        // Sequence numbers belong to the WebSocket session. A client that
+        // re-enters an existing room may start them again from zero.
+        player.lastStateSeq = undefined;
+        player.lastInputSeq = undefined;
         player.appearance = normalizeSnakeAppearance(user.settings?.snakeAppearance ?? player.appearance);
         player.disconnectedAt = undefined;
         for (const socket of this.ctx.getWebSockets())

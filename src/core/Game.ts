@@ -368,14 +368,17 @@ export class Game {
       }
     });
     this.networkManager.on('roomSocketConnected', () => {
-      if (this.liveWorld && !this.isSpectating)
+      if (this.liveWorld && !this.isSpectating && !this.isWaitingForStart &&
+          !this.isRoomTransitionPending && !this.isGameOver)
         this.isPaused ? this.sendLivePause() : this.sendLivePlayerState('reconnect');
     });
     this.networkManager.on('room.state', (snapshot: RoomSnapshot) => {
       if (!this.isRoomTransitionPending) this.applyLiveSnapshot(snapshot);
     });
     this.networkManager.on('room.syncRequested', () => {
-      if (this.liveWorld && !this.isSpectating) this.sendLivePlayerState('spectator-sync');
+      if (this.liveWorld && !this.isSpectating && !this.isWaitingForStart &&
+          !this.isRoomTransitionPending && !this.isGameOver)
+        this.sendLivePlayerState('spectator-sync');
     });
     this.networkManager.on('player.joined', () => this.networkManager.requestResync());
     this.networkManager.on('room.left', (change: any) => {

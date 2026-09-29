@@ -426,6 +426,43 @@ describe('room state preparation', () => {
 });
 
 describe('terminal save diagnostics', () => {
+  it('accepts a fresh state sequence after reconnecting a living player', async () => {
+    const state = createSimulation(123);
+    const player = addPlayer(state, 'player-1', 'Player', 0, {
+      entityId: 'entity-1', instanceId: 'old-connection',
+    });
+    player.lastStateSeq = 12;
+    player.lastInputSeq = 8;
+    const server = {
+      serializeAttachment: vi.fn(), send: vi.fn(),
+    };
+    vi.stubGlobal('WebSocketPair', class {
+      0 = {};
+      1 = server;
+    });
+    const NativeResponse = Response;
+    vi.stubGlobal('Response', class {
+      constructor(_body: unknown, public init: ResponseInit) {}
+    });
+    try {
+      const storage = { put: vi.fn(), deleteAlarm: vi.fn() };
+      const object = new RoomDurableObject({
+        storage, acceptWebSocket: vi.fn(), getWebSockets: () => [],
+      } as any, { DB: { prepare: () => ({ bind: () => ({ first: async () => ({ spawn_index: 0 }) }) }) } } as any);
+      (object as any).simulation = state;
+      await (object as any).socket(new Request('https://room/socket', {
+        headers: { upgrade: 'websocket', 'x-user': JSON.stringify({ id: 'player-1', username: 'Player' }), 'x-seed': '123' },
+      }));
+      expect(player.lastStateSeq).toBeUndefined();
+      expect(player.lastInputSeq).toBeUndefined();
+      expect(player.instanceId).not.toBe('old-connection');
+      expect(storage.put).toHaveBeenCalledWith('simulation', state);
+    } finally {
+      vi.stubGlobal('Response', NativeResponse);
+      vi.unstubAllGlobals();
+    }
+  });
+
   function setup() {
     const state = createSimulation(123);
     const player = addPlayer(state, 'player-1', 'Player', 0, {
