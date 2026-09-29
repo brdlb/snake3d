@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { generationSeed } from '../../shared/roomCoordinates';
 
 // Food Colors Constants
 export const FOOD_COLORS = {
@@ -35,7 +36,7 @@ export class World {
     constructor(size: number = WORLD_SIZE, seed?: number) {
         this.size = size;
         this.seed = seed ?? Math.floor(Math.random() * 1000000);
-        this.random = mulberry32(this.seed);
+        this.random = mulberry32(generationSeed(this.seed));
         this.respawnFood([]);
     }
 
@@ -51,7 +52,7 @@ export class World {
      */
     public setSeed(seed: number): void {
         this.seed = seed;
-        this.random = mulberry32(seed);
+        this.random = mulberry32(generationSeed(seed));
         this.respawnFood([]);
     }
 

@@ -9,7 +9,10 @@ export class SceneManager {
 
     private ambientLight: THREE.AmbientLight;
     private directionalLight: THREE.DirectionalLight;
-    private wallMesh: THREE.Mesh | undefined;
+    private wallMesh: THREE.Group | undefined;
+    private previousWallMeshes = new Set<THREE.Group>();
+    private portalGates: THREE.Object3D[] = [];
+    private portalLabelTexture: THREE.CanvasTexture | undefined;
 
     constructor(fov: number) {
         // Renderer
@@ -69,13 +72,88 @@ export class SceneManager {
     }
 
     public setupWalls(size: number) {
-        // Add 1 to size so walls visually contain segments at positions 0 and size
+        if (this.wallMesh) this.scene.remove(this.wallMesh);
         const wallSize = size + 1;
-        const boundaryGeo = new THREE.BoxGeometry(wallSize, wallSize, wallSize);
-        this.wallMesh = new THREE.Mesh(boundaryGeo, WallMaterial);
-        // Position so that the playable area spans from 0 to size
+        const aperture = 5;
+        const strip = (wallSize - aperture) / 2;
+        const center = (wallSize + aperture) / 4;
+        this.wallMesh = new THREE.Group();
+        this.portalGates = [];
+        const labelCanvas = document.createElement('canvas');
+        labelCanvas.width = 512;
+        labelCanvas.height = 128;
+        const context = labelCanvas.getContext('2d');
+        if (context) {
+            context.fillStyle = '#ffffff';
+            context.font = 'bold 42px monospace';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText('LENGTH 100', 256, 64);
+        }
+        this.portalLabelTexture = new THREE.CanvasTexture(labelCanvas);
+        const faces: Array<[THREE.Vector3, THREE.Euler]> = [
+            [new THREE.Vector3(0, 0, wallSize / 2), new THREE.Euler()],
+            [new THREE.Vector3(0, 0, -wallSize / 2), new THREE.Euler(0, Math.PI, 0)],
+            [new THREE.Vector3(wallSize / 2, 0, 0), new THREE.Euler(0, Math.PI / 2, 0)],
+            [new THREE.Vector3(-wallSize / 2, 0, 0), new THREE.Euler(0, -Math.PI / 2, 0)],
+            [new THREE.Vector3(0, wallSize / 2, 0), new THREE.Euler(-Math.PI / 2, 0, 0)],
+            [new THREE.Vector3(0, -wallSize / 2, 0), new THREE.Euler(Math.PI / 2, 0, 0)],
+        ];
+        for (const [position, rotation] of faces) {
+            const face = new THREE.Group();
+            face.position.copy(position);
+            face.rotation.copy(rotation);
+            const addStrip = (width: number, height: number, x: number, y: number) => {
+                const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), WallMaterial);
+                mesh.position.set(x, y, 0);
+                face.add(mesh);
+            };
+            addStrip(wallSize, strip, 0, center);
+            addStrip(wallSize, strip, 0, -center);
+            addStrip(strip, aperture, center, 0);
+            addStrip(strip, aperture, -center, 0);
+            const gate = new THREE.Mesh(
+                new THREE.PlaneGeometry(aperture, aperture),
+                new THREE.MeshBasicMaterial({ color: 0x24c9ec, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
+            );
+            face.add(gate);
+            this.portalGates.push(gate);
+            const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.portalLabelTexture, transparent: true, depthWrite: false }));
+            label.position.z = -0.04;
+            label.scale.set(4.5, 1.1, 1);
+            face.add(label);
+            this.portalGates.push(label);
+            this.wallMesh.add(face);
+        }
         this.wallMesh.position.set(size / 2, size / 2, size / 2);
         this.scene.add(this.wallMesh);
+    }
+
+    public setPortalOpen(open: boolean): void {
+        for (const gate of this.portalGates) gate.visible = !open;
+    }
+
+    public shiftPreviousRooms(offset: THREE.Vector3): void {
+        for (const room of this.previousWallMeshes) room.position.sub(offset);
+    }
+
+    public showPreviousRoom(offset: THREE.Vector3): THREE.Group | null {
+        if (!this.wallMesh) return null;
+        const previous = this.wallMesh.clone(true);
+        previous.position.copy(this.wallMesh.position).sub(offset);
+        this.previousWallMeshes.add(previous);
+        this.scene.add(previous);
+        return previous;
+    }
+
+    public removePreviousRoom(room: THREE.Group): void {
+        this.scene.remove(room);
+        this.previousWallMeshes.delete(room);
+    }
+
+    public clearPreviousRooms(): void {
+        for (const room of this.previousWallMeshes) this.scene.remove(room);
+        this.previousWallMeshes.clear();
     }
 
     public setWallsVisible(visible: boolean): void {
@@ -91,6 +169,16 @@ export class SceneManager {
     public dispose() {
         window.removeEventListener('resize', this.onWindowResize.bind(this));
         this.renderer.dispose();
-        if (this.wallMesh) this.wallMesh.geometry.dispose();
+        this.clearPreviousRooms();
+        if (this.wallMesh) {
+            this.wallMesh.traverse((object) => {
+                if (object instanceof THREE.Mesh) {
+                    object.geometry.dispose();
+                    if (object.material !== WallMaterial) object.material.dispose();
+                }
+                if (object instanceof THREE.Sprite) object.material.dispose();
+            });
+        }
+        this.portalLabelTexture?.dispose();
     }
 }

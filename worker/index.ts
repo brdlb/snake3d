@@ -11,6 +11,7 @@ import {
   type SimulationState,
 } from '../shared/simulation';
 import { createRandomSnakeAppearance, isSnakeAppearance, normalizeSnakeAppearance, type SnakeAppearance } from '../shared/appearance';
+import { adjacentRoom, crossedPortal, portalOffset, roomCoordinates, roomSeed, PORTAL_MIN_LENGTH, type PortalDirection } from '../shared/roomCoordinates';
 import type { PauseInput } from '../shared/realtime';
 import type {
   DeathInput,
@@ -208,10 +209,9 @@ const roomActions = new Set<RoomAction>([
   'join',
   'spectate',
 ]);
-const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] & 0x7fffffff;
 async function createRoomSeed(env: Env, user: User) {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const seed = randomSeed(),
+  for (let x = 0; x <= 65535; x++) {
+    const seed = roomSeed({ x, y: 0, z: 0 }),
       result = await env.DB.prepare(
         'INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)',
       )
@@ -219,7 +219,7 @@ async function createRoomSeed(env: Env, user: User) {
         .run();
     if (result.meta.changes === 1) return seed;
   }
-  throw new Error('ROOM_SEED_COLLISION');
+  throw new Error('ROOM_COORDINATES_EXHAUSTED');
 }
 export function parseRoomSeed(value: string | null) {
   if (value === null || !/^\d+$/.test(value)) return null;
@@ -384,7 +384,7 @@ export default {
     }
     if (path === '/api/v1/rooms/enter' && request.method === 'GET') {
       const rows = await env.DB.prepare(
-        'SELECT r.seed, EXISTS(SELECT 1 FROM replays p WHERE p.room_seed=r.seed) AS has_record FROM rooms r',
+        'SELECT r.seed, EXISTS(SELECT 1 FROM replays p WHERE p.room_seed=r.seed) AS has_record FROM rooms r WHERE r.seed>=2147483648',
       ).all<{ seed: number; has_record: number }>();
       if (rows.results.length === 0) return json({ seed: await createRoomSeed(env, user) }, 200, requestId);
       const counts = await Promise.all(rows.results.map(async (row) => {
@@ -427,7 +427,86 @@ export default {
       }, 200, requestId);
     }
     if (path === '/api/v1/rooms' && request.method === 'POST') {
-      return json({ seed: await createRoomSeed(env, user) }, 201, requestId);
+      const data = await body(request, requestId);
+      if (data instanceof Response) return data;
+      if (!data || typeof data !== 'object') return fail('INVALID_ROOM_COORDINATES', 400, requestId);
+      const coordinates = data as { x?: unknown; y?: unknown; z?: unknown };
+      if (Object.keys(coordinates).length === 0)
+        return json({ seed: await createRoomSeed(env, user) }, 201, requestId);
+      if (![coordinates.x, coordinates.y, coordinates.z].every(Number.isInteger))
+        return fail('INVALID_ROOM_COORDINATES', 400, requestId);
+      let seed: number;
+      try { seed = roomSeed(coordinates as { x: number; y: number; z: number }); }
+      catch { return fail('WORLD_EDGE', 400, requestId); }
+      await env.DB.prepare('INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)')
+        .bind(seed, Math.floor(user.elo / 100), now()).run();
+      return json({ seed }, 200, requestId);
+    }
+    if (path === '/api/v1/rooms/portal' && request.method === 'POST') {
+      const data = await body(request, requestId);
+      if (data instanceof Response) return data;
+      if (!data || typeof data !== 'object') return fail('INVALID_PORTAL', 400, requestId);
+      const { fromSeed, direction, state } = data as { fromSeed?: unknown; direction?: unknown; state?: unknown };
+      if (!Number.isSafeInteger(fromSeed) || typeof direction !== 'string' ||
+          !['xp', 'xn', 'yp', 'yn', 'zp', 'zn'].includes(direction) || !snakeState(state))
+        return fail('INVALID_PORTAL', 400, requestId);
+      const source = roomCoordinates(fromSeed as number);
+      if (!source || crossedPortal(state.segments[0], state.segments.length) !== direction)
+        return fail('PORTAL_CLOSED', 409, requestId);
+      const offset = portalOffset(direction as PortalDirection);
+      if (state.direction.x !== Math.sign(offset.x) ||
+          state.direction.y !== Math.sign(offset.y) ||
+          state.direction.z !== Math.sign(offset.z))
+        return fail('INVALID_PORTAL_DIRECTION', 409, requestId);
+      const assignment = await env.DB.prepare('SELECT room_seed FROM room_assignments WHERE user_id=?')
+        .bind(user.id).first<{ room_seed: number }>();
+      if (assignment?.room_seed !== fromSeed) return fail('ROOM_CONTEXT_MISMATCH', 409, requestId);
+      const sourceRoom = env.ROOMS.get(env.ROOMS.idFromName(String(fromSeed)));
+      const check = await sourceRoom.fetch('https://room/portal-check', {
+        method: 'POST', body: JSON.stringify({ userId: user.id, state }),
+      });
+      if (!check.ok) return fail('PORTAL_CLOSED', 409, requestId);
+      const { length } = await check.json<{ length: number }>();
+      if (length < PORTAL_MIN_LENGTH) return fail('PORTAL_CLOSED', 409, requestId);
+      let targetSeed: number;
+      try { targetSeed = roomSeed(adjacentRoom(source, direction as PortalDirection)); }
+      catch { return fail('WORLD_EDGE', 409, requestId); }
+      const transferred = {
+        ...state,
+        segments: state.segments.map((segment) => ({
+          x: segment.x - offset.x, y: segment.y - offset.y, z: segment.z - offset.z,
+        })),
+      };
+      const time = now();
+      await env.DB.prepare('INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)')
+        .bind(targetSeed, Math.floor(user.elo / 100), time).run();
+      const targetRoom = env.ROOMS.get(env.ROOMS.idFromName(String(targetSeed)));
+      const arrival = await targetRoom.fetch('https://room/portal-enter', {
+        method: 'POST', body: JSON.stringify({ user, seed: targetSeed, state: transferred }),
+      });
+      if (!arrival.ok) return fail(arrival.status === 409 ? 'PORTAL_BLOCKED' : 'PORTAL_TRANSFER_FAILED', arrival.status === 409 ? 409 : 502, requestId);
+      try {
+        await env.DB.batch([
+        env.DB.prepare('INSERT INTO user_room_visits(user_id,room_seed,visited_at) VALUES(?,?,?) ON CONFLICT(user_id,room_seed) DO NOTHING').bind(user.id, targetSeed, time),
+        env.DB.prepare('UPDATE users SET last_room_seed=?,last_seen=? WHERE id=?').bind(targetSeed, time, user.id),
+        env.DB.prepare('INSERT INTO room_assignments(user_id,room_seed,spawn_index,assigned_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET room_seed=excluded.room_seed,spawn_index=excluded.spawn_index,assigned_at=excluded.assigned_at').bind(user.id, targetSeed, 0, time),
+        env.DB.prepare('INSERT INTO room_players(room_seed,user_id,spawn_index,joined_at) VALUES(?,?,?,?) ON CONFLICT(room_seed,user_id) DO UPDATE SET spawn_index=excluded.spawn_index,joined_at=excluded.joined_at').bind(targetSeed, user.id, 0, time),
+        env.DB.prepare('UPDATE rooms SET updated_at=? WHERE seed=?').bind(time, targetSeed),
+        ]);
+      } catch (error) {
+        await targetRoom.fetch('https://room/portal-leave', {
+          method: 'POST', body: JSON.stringify({ userId: user.id }),
+        });
+        throw error;
+      }
+      try {
+        await sourceRoom.fetch('https://room/portal-leave', {
+          method: 'POST', body: JSON.stringify({ userId: user.id }),
+        });
+      } catch (error) {
+        console.error('Failed to remove portal player from previous room:', error);
+      }
+      return arrival;
     }
     const roomResource = path.match(/^\/api\/v1\/rooms\/(\d+)$/);
     const roomDiagnostics = path.match(/^\/api\/v1\/rooms\/(\d+)\/diagnostics$/);
@@ -603,6 +682,8 @@ export class RoomDurableObject {
     (state.trajectories ??= {})[player.id] = {
       startPosition: { ...player.segments[0] },
       startDirection: { ...player.direction },
+      startSegments: player.segments.map((segment) => ({ ...segment })),
+      initialScore: player.score,
       spawnIndex,
       initialSpeed: player.speed,
       changes: [],
@@ -661,6 +742,59 @@ export class RoomDurableObject {
       }));
       return json({ count: state ? Object.values(state.players).filter((player) =>
         player.alive && !player.phantom && connected.has(player.id)).length : 0 });
+    }
+    if (path === '/portal-check') {
+      const { userId, state: incoming } = await request.json<{ userId: string; state: unknown }>();
+      const state = this.simulation ?? await this.ctx.storage.get<SimulationState>('simulation');
+      const player = state && Object.values(state.players).find((item) => item.id === userId && item.alive && !item.phantom);
+      if (!player || !snakeState(incoming) || incoming.segments.length < PORTAL_MIN_LENGTH)
+        return new Response(null, { status: 409 });
+      return json({ length: incoming.segments.length });
+    }
+    if (path === '/portal-enter') {
+      const { user, seed, state: incoming } = await request.json<{ user: User; seed: number; state: Omit<StateInput, 'type' | 'seq' | 'step' | 'reason'> }>();
+      if (!snakeState(incoming) || incoming.segments.length < PORTAL_MIN_LENGTH)
+        return new Response(null, { status: 400 });
+      const state = await this.liveState(seed);
+      const head = incoming.segments[0];
+      if (Object.values(state.players).some((candidate) =>
+        candidate.alive && candidate.id !== user.id && candidate.segments.some((segment) =>
+          segment.x === head.x && segment.y === head.y && segment.z === head.z)))
+        return new Response(null, { status: 409 });
+      for (const [id, player] of Object.entries(state.players))
+        if (player.id === user.id && !player.phantom) delete state.players[id];
+      const player = addPlayer(state, user.id, user.username, Date.now(), {
+        segments: incoming.segments, direction: incoming.direction, up: incoming.up,
+        score: incoming.score, appearance: normalizeSnakeAppearance(user.settings?.snakeAppearance),
+        entityId: crypto.randomUUID(), spawnIndex: 0,
+      });
+      player.speed = incoming.speed;
+      this.startTrajectory(state, player, 0);
+      await this.persist(state);
+      this.broadcast({
+        v: 2, type: 'player.joined', payload: {
+          user: { id: user.id, username: user.username }, timestamp: Date.now(),
+          action: { type: 'spawn', entityId: player.entityId,
+            position: player.segments[0], direction: player.direction, up: player.up },
+        },
+      });
+      return json(await this.roomData(seed, user, true, {
+        position: incoming.segments[0], direction: incoming.direction, up: incoming.up,
+      }, incoming.segments));
+    }
+    if (path === '/portal-leave') {
+      const { userId } = await request.json<{ userId: string }>();
+      const state = this.simulation ?? await this.ctx.storage.get<SimulationState>('simulation');
+      if (state) {
+        for (const [id, player] of Object.entries(state.players))
+          if (player.id === userId && !player.phantom) {
+            delete state.players[id];
+            delete state.trajectories?.[userId];
+            this.broadcast({ v: 2, type: 'room.left', payload: { entityId: id, userId } });
+          }
+        await this.persist(state);
+      }
+      return new Response(null, { status: 204 });
     }
     if (path === '/socket') {
       if (request.headers.get('x-restart') === '1')
@@ -812,7 +946,7 @@ export class RoomDurableObject {
   }
   private async selectRoom(user: User) {
     const candidates = await this.env.DB.prepare(
-      `SELECT r.seed AS seed, COALESCE(AVG(CAST(json_extract(p.payload_json,'$.elo') AS REAL)),1000) AS average_elo, COUNT(p.id) AS phantom_count FROM rooms r LEFT JOIN replays p ON p.room_seed=r.seed WHERE NOT EXISTS (SELECT 1 FROM user_room_visits v WHERE v.user_id=? AND v.room_seed=r.seed) GROUP BY r.seed`,
+      `SELECT r.seed AS seed, COALESCE(AVG(CAST(json_extract(p.payload_json,'$.elo') AS REAL)),1000) AS average_elo, COUNT(p.id) AS phantom_count FROM rooms r LEFT JOIN replays p ON p.room_seed=r.seed WHERE r.seed>=2147483648 AND NOT EXISTS (SELECT 1 FROM user_room_visits v WHERE v.user_id=? AND v.room_seed=r.seed) GROUP BY r.seed`,
     )
       .bind(user.id)
       .all<{ seed: number; average_elo: number; phantom_count: number }>();
@@ -855,6 +989,13 @@ export class RoomDurableObject {
         .bind(user.id)
         .first<{ last_room_seed: number | null }>();
       seed = last?.last_room_seed ?? (await this.createRoom(user));
+    } else if (action === 'next') {
+      const source = roomCoordinates(current!.room_seed);
+      const target = source ? adjacentRoom(source, 'xp') : { x: 0, y: 0, z: 0 };
+      try { seed = roomSeed(target); }
+      catch { return json({ error: { code: 'WORLD_EDGE' } }, 409); }
+      await this.env.DB.prepare('INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)')
+        .bind(seed, Math.floor(user.elo / 100), now()).run();
     } else {
       seed = await this.selectRoom(user);
     }
@@ -1009,6 +1150,8 @@ export class RoomDurableObject {
           initialSpeed: terminal.trajectory.initialSpeed,
           startPosition: terminal.trajectory.startPosition,
           startDirection: terminal.trajectory.startDirection,
+          startSegments: terminal.trajectory.startSegments,
+          initialScore: terminal.trajectory.initialScore,
         },
         trajectoryLog: terminal.trajectory.changes,
         timestamp: Date.now(),

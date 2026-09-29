@@ -7,6 +7,7 @@ A browser-based 3D Snake game built with TypeScript, Three.js, and Vite. The cur
 - Move through a 3D arena, collect three kinds of food, grow, and change speed.
 - Complete the first-run tutorial; restart it from Settings.
 - Create or select a room, share its `?room=<seed>` link, and play alongside other players.
+- Coordinate rooms form a 3D grid. At length 100, the central five cells of each wall become a portal to the adjacent room. The new room appears when the head enters; earlier rooms remain visible until the body leaves them.
 - Enter an invited room as a player or a spectator. Spectators can use a free camera or follow a snake.
 - Encounter replay-based phantom snakes, compare room records, and view the leaderboard.
 - Play locally when the online service is unavailable. Offline results and previously cached phantoms are stored in the browser.
@@ -68,6 +69,8 @@ After editing client code, run `npm run build` again so the Worker serves the up
 `worker/index.ts` serves the built assets and the `/api/v1` HTTP API. An automatic cookie-based guest session identifies each player. D1 stores users, rooms, records, and saved replays. A Durable Object holds each room's live state and relays WebSocket events to players and spectators. The browser runs the game simulation and sends direction and state checkpoints; other clients animate players between those checkpoints. Saved replays become phantom snakes in later runs.
 
 The server checks message structure and some movement rules, but it currently accepts client-reported positions, speed, and score. Treat room records and leaderboard results as casual-game results, not cheat-resistant rankings.
+
+Coordinate room IDs encode signed `(x, y, z)` positions and stay within JavaScript's safe integer range. `POST /api/v1/rooms` accepts `{ "x": 0, "y": 1, "z": -2 }` to create or retrieve a specific room, while an empty body creates the next room on the positive X axis. `NEXT` also advances one room along positive X. Portal travel uses `POST /api/v1/rooms/portal` and transfers the snake's full body, score, speed, and heading to the neighboring room. Older random-seed rooms remain accessible by their existing links but have no coordinate portals.
 
 ### Investigating a delayed game save
 

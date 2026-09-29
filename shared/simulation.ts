@@ -1,4 +1,5 @@
 import { DEFAULT_SNAKE_APPEARANCE, normalizeSnakeAppearance, type SnakeAppearance } from './appearance';
+import { generationSeed } from './roomCoordinates';
 
 /** Deterministic, renderer-free rules used by both the browser and the Room DO. */
 export type Axis = { x: number; y: number; z: number };
@@ -29,6 +30,8 @@ export type SimPlayer = {
 export type ReplayTrajectory = {
   startPosition: Axis;
   startDirection: Axis;
+  startSegments?: Axis[];
+  initialScore?: number;
   spawnIndex: number;
   initialSpeed: number;
   changes: Array<{ position: Axis; direction: Axis }>;
@@ -93,7 +96,7 @@ export function foodEffect(kind: FoodKind) {
       : { score: 3, growth: 3, speed: -10 };
 }
 export function createSimulation(seed: number): SimulationState {
-  const random = rng(seed),
+  const random = rng(generationSeed(seed)),
     food: Food[] = [];
   while (food.length < FOOD_COUNT) {
     const p = {
@@ -108,7 +111,7 @@ export function createSimulation(seed: number): SimulationState {
 }
 export function safeSpawn(
   state: SimulationState,
-  _random = rng(state.seed + state.tick + Object.keys(state.players).length),
+  _random = rng(generationSeed(state.seed) + state.tick + Object.keys(state.players).length),
   requestedIndex?: number,
 ): { position: Axis; direction: Axis; spawnIndex: number; safe: boolean } {
   void _random;
@@ -218,7 +221,7 @@ export function validInput(
 }
 function respawn(state: SimulationState, index: number): FoodChange {
   const removed = clone(state.food[index]),
-    random = rng(state.seed + state.tick * 7919 + index),
+    random = rng(generationSeed(state.seed) + state.tick * 7919 + index),
     occupied = new Set(
       Object.values(state.players)
         .flatMap((p) => p.segments)

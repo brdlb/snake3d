@@ -106,16 +106,15 @@ export class Phantom {
         // Вычисляем вектор "назад" для размещения хвоста
         const backVector = this.moveDirection.clone().negate();
 
-        this.segments = [];
-        this.segments.push(position.clone());
-        this.segments.push(position.clone().add(backVector.clone()));
-        this.segments.push(position.clone().add(backVector.clone().multiplyScalar(2)));
+        this.segments = params.startSegments?.length
+            ? params.startSegments.map(fromVec3)
+            : [position.clone(), position.clone().add(backVector.clone()), position.clone().add(backVector.clone().multiplyScalar(2))];
 
         this.accumulatedTime = 0;
         this.growthPending = 0;
         this.isDead = false;
         this.currentSPM = this.replayPlayer.getInitialSpeed();
-        this.currentScore = 0;
+        this.currentScore = params.initialScore ?? 0;
         this.lastDirectionChange = null;
 
         this.replayPlayer.reset();

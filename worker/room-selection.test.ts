@@ -1,6 +1,51 @@
 import { describe, expect, it, vi } from 'vitest';
 import { chooseSpawn, parseRoomSeed, rankNextRooms, replayReplacementOrder, ROOM_LIST_QUERY, ROOM_REPLAYS_QUERY, RoomDurableObject } from './index';
 import { addPlayer, createSimulation } from '../shared/simulation';
+import { roomSeed } from '../shared/roomCoordinates';
+
+describe('portal room transfer', () => {
+  const user = {
+    id: 'player-1', username: 'PLAYER', settings: { musicVolume: 0.5, sfxVolume: 0.7 },
+  };
+  const segments = Array.from({ length: 100 }, (_, index) => ({ x: 51 - index, y: 25, z: 25 }));
+  const stateInput = {
+    segments, direction: { x: 1, y: 0, z: 0 }, up: { x: 0, y: 1, z: 0 }, score: 200, speed: 450,
+  };
+
+  it('accepts a level-one opening only for a living assigned snake with 100 segments', async () => {
+    const state = createSimulation(roomSeed({ x: 0, y: 0, z: 0 }));
+    addPlayer(state, user.id, user.username, Date.now());
+    const object = new RoomDurableObject({ storage: {}, getWebSockets: () => [] } as any, {} as any);
+    (object as any).simulation = state;
+    (object as any).persist = vi.fn();
+    const request = (length: number) => new Request('https://room/portal-check', {
+      method: 'POST', body: JSON.stringify({ userId: user.id, state: { ...stateInput, segments: segments.slice(0, length) } }),
+    });
+    expect((await object.fetch(request(99))).status).toBe(409);
+    const response = await object.fetch(request(100));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ length: 100 });
+  });
+
+  it('creates the destination player with the whole translated body, score and speed', async () => {
+    const target = roomSeed({ x: 1, y: 0, z: 0 });
+    const state = createSimulation(target);
+    const object = new RoomDurableObject({ storage: {}, getWebSockets: () => [] } as any, {} as any);
+    (object as any).liveState = vi.fn().mockResolvedValue(state);
+    (object as any).persist = vi.fn();
+    (object as any).roomData = vi.fn().mockResolvedValue({ seed: target, phantoms: [], playerSpawnIndex: 0 });
+    const translated = segments.map((segment) => ({ ...segment, x: segment.x - 51 }));
+    const response = await object.fetch(new Request('https://room/portal-enter', {
+      method: 'POST', body: JSON.stringify({ user, seed: target, state: { ...stateInput, segments: translated } }),
+    }));
+    const player = Object.values(state.players).find((item) => item.id === user.id);
+    expect(response.status).toBe(200);
+    expect(player?.segments).toEqual(translated);
+    expect(player?.score).toBe(200);
+    expect(player?.speed).toBe(450);
+    expect(state.trajectories?.[user.id].startSegments).toEqual(translated);
+  });
+});
 
 describe('room selection rules', () => {
   it('accepts only a safe integer invitation seed', () => {

@@ -54,6 +54,14 @@ export class ReplayRecorder {
         console.log('[ReplayRecorder] Recording started');
     }
 
+    public setStartSegments(segments: THREE.Vector3[]): void {
+        this.startParams.startSegments = segments.map(toVec3);
+    }
+
+    public setInitialScore(score: number): void {
+        this.startParams.initialScore = score;
+    }
+
     /**
      * Остановить запись
      */
@@ -143,7 +151,9 @@ export class ReplayPlayer {
             spawnIndex: legacyStartParams?.spawnIndex ?? 0,
             initialSpeed: legacyStartParams?.initialSpeed ?? 300,
             startPosition: legacyStartParams?.startPosition,
-            startDirection: legacyStartParams?.startDirection
+            startDirection: legacyStartParams?.startDirection,
+            startSegments: legacyStartParams?.startSegments,
+            initialScore: legacyStartParams?.initialScore
         };
         this.deathPosition = fromVec3(replayData.deathPosition);
         this.replayId = replayData.id;

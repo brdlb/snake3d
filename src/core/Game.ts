@@ -3,6 +3,7 @@ import { Loop } from './Loop';
 import { InputManager } from './Input';
 import { Snake } from '../entities/Snake';
 import { World, FOOD_COLORS, WORLD_SIZE } from '../entities/World';
+import { crossedPortal, portalOffset, PORTAL_MIN_LENGTH, type PortalDirection } from '../../shared/roomCoordinates';
 import { Phantom } from '../entities/Phantom';
 import { getSpawnPoint, getRandomSpawnIndex } from '../entities/SpawnPoints';
 import { ParticleSystem } from '../graphics/ParticleSystem';
@@ -47,6 +48,27 @@ interface Pulse {
   speed: number;
   originIndex: number; // Index of head when pulse started (always 0)
 }
+
+type RenderOpponent = {
+  id: string;
+  name: string;
+  score: number;
+  speed: number;
+  alive: boolean;
+  paused: boolean;
+  phantom: boolean;
+  color: string;
+  appearance: SnakeAppearance;
+  segments: THREE.Vector3[];
+  direction: THREE.Quaternion;
+  directionVector: THREE.Vector3;
+  up: THREE.Vector3;
+  elapsed: number;
+  serverTick: number;
+  serverTime: number;
+  replay?: ReplayData;
+  replayIndex: number;
+};
 
 import { Pathfinder } from './Pathfinder';
 import { OfflineDataManager } from '../utils/OfflineDataManager';
@@ -105,26 +127,7 @@ export class Game {
 
   // Async Multiplayer: Phantoms & Replay
   private phantoms: Phantom[] = [];
-  private liveOpponents: Array<{
-    id: string;
-    name: string;
-    score: number;
-    speed: number;
-    alive: boolean;
-    paused: boolean;
-    phantom: boolean;
-    color: string;
-    appearance: SnakeAppearance;
-    segments: THREE.Vector3[];
-    direction: THREE.Quaternion;
-    directionVector: THREE.Vector3;
-    up: THREE.Vector3;
-    elapsed: number;
-    serverTick: number;
-    serverTime: number;
-    replay?: ReplayData;
-    replayIndex: number;
-  }> = [];
+  private liveOpponents: RenderOpponent[] = [];
   private livePhantomReplays = new Map<string, ReplayData>();
   private deadLivePhantoms = new Set<string>();
   private localEntityId: string | null = null;
@@ -133,6 +136,7 @@ export class Game {
   private replayRecorder: ReplayRecorder | null = null;
   private networkManager: NetworkManager;
   private currentSeed: number = 0;
+  private previousRooms: Array<{ seed: number; offset: THREE.Vector3; walls: THREE.Group; food: THREE.InstancedMesh; opponents: RenderOpponent[]; unwatch: () => void }> = [];
 
   // Pause & Stats
   private isPaused: boolean = false;
@@ -1309,6 +1313,7 @@ export class Game {
     this.miniMap.dispose();
     if (this.welcomeScreen) this.welcomeScreen.dispose();
     this.spectatorBanner?.remove();
+    this.clearPreviousRooms();
 
     // Dispose Resources only when the playfield was constructed. A new player
     // can close the onboarding screen before choosing to initialize it.
@@ -1424,16 +1429,28 @@ export class Game {
   private isGameOver: boolean = false;
 
   private advanceLiveOpponents(delta: number) {
-    if (this.liveWorld)
+    if (this.liveWorld) {
       advanceLiveOpponents(this.liveOpponents, delta, (direction, up) =>
         this.orientationQuaternion(direction, up),
       );
+      for (const room of this.previousRooms)
+        advanceLiveOpponents(room.opponents, delta, (direction, up) =>
+          this.orientationQuaternion(direction, up));
+    }
   }
 
   private update(delta: number) {
     this.time += delta;
 
     if (!this.playfieldInitialized) return;
+
+    if (this.isRoomTransitionPending) {
+      this.cameraController.update(delta, this.snake.getHead(), this.snake.direction, 0);
+      return;
+    }
+
+    this.sceneManager.setPortalOpen(this.snake.segments.length >= PORTAL_MIN_LENGTH && this.liveWorld);
+    this.removeClearedRooms();
 
     // Если ожидаем нажатия кнопки "Старт" — только рендерим сцену
     if (this.isWaitingForStart) {
@@ -1517,6 +1534,9 @@ export class Game {
     this.advanceLiveOpponents(delta);
     if (this.liveWorld) this.checkLivePhantomCollisions();
     const preStepHead = this.snake.getHead().clone();
+    const atBoundary = [preStepHead.x, preStepHead.y, preStepHead.z].some((coordinate) =>
+      coordinate === 0 || coordinate === WORLD_SIZE);
+    const preStepSegments = atBoundary ? this.snake.segments.map((segment) => segment.clone()) : null;
     if (this.showUpcomingTutorialFood(preStepHead)) return;
     if (this.snake.update(delta)) {
       this.playerTick++;
@@ -1547,7 +1567,8 @@ export class Game {
 
       this.soundManager.playStep(rate);
 
-      this.checkCollisions();
+      this.checkCollisions(preStepSegments);
+      if (this.isRoomTransitionPending) return;
 
       // Update Pathfinder on Step
       this.pathfinder.updatePathVisualization(
@@ -1767,11 +1788,139 @@ export class Game {
     return true;
   }
 
-  private checkCollisions() {
+  private clearPreviousRooms(): void {
+    for (const room of this.previousRooms) {
+      room.unwatch();
+      this.sceneManager.removePreviousRoom(room.walls);
+      this.sceneManager.scene.remove(room.food);
+    }
+    this.previousRooms = [];
+  }
+
+  private removeClearedRooms(): void {
+    this.previousRooms = this.previousRooms.filter((room) => {
+      const occupied = this.snake.segments.some((segment) =>
+        (['x', 'y', 'z'] as const).every((axis) =>
+          segment[axis] >= room.offset[axis] && segment[axis] <= room.offset[axis] + WORLD_SIZE));
+      if (!occupied) {
+        room.unwatch();
+        this.sceneManager.removePreviousRoom(room.walls);
+        this.sceneManager.scene.remove(room.food);
+      }
+      return occupied;
+    });
+  }
+
+  private createPreviousFood(offset: THREE.Vector3, positions: THREE.Vector3[], colors: THREE.Color[]): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(this.foodMesh.geometry, this.foodMaterial, positions.length);
+    mesh.count = positions.length;
+    mesh.position.copy(offset);
+    mesh.frustumCulled = false;
+    const dummy = new THREE.Object3D();
+    positions.forEach((position, index) => {
+      dummy.position.copy(position);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(index, dummy.matrix);
+      mesh.setColorAt(index, colors[index]);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    this.sceneManager.scene.add(mesh);
+    return mesh;
+  }
+
+  private applyPreviousSnapshot(room: (typeof this.previousRooms)[number], snapshot: RoomSnapshot): void {
+    if (!this.previousRooms.includes(room)) return;
+    const me = this.networkManager.getUser()?.id;
+    room.opponents = snapshot.players
+      .filter((player) => player.id !== me)
+      .map((player) => this.createLiveOpponent(player, snapshot.tick, snapshot.serverTime));
+    room.food.count = Math.min(snapshot.food.length, room.food.instanceMatrix.count);
+    const dummy = new THREE.Object3D();
+    snapshot.food.slice(0, room.food.count).forEach((food, index) => {
+      dummy.position.set(food.x, food.y, food.z);
+      dummy.updateMatrix();
+      room.food.setMatrixAt(index, dummy.matrix);
+      room.food.setColorAt(index, new THREE.Color(
+        food.kind === 'green' ? FOOD_COLORS.GREEN : food.kind === 'pink' ? FOOD_COLORS.PINK : FOOD_COLORS.BLUE));
+    });
+    room.food.instanceMatrix.needsUpdate = true;
+    if (room.food.instanceColor) room.food.instanceColor.needsUpdate = true;
+  }
+
+  private async enterPortal(direction: PortalDirection, preStepSegments: THREE.Vector3[] | null): Promise<void> {
+    if (this.isRoomTransitionPending) return;
+    this.isRoomTransitionPending = true;
+    const state = this.livePlayerState();
+    const delta = portalOffset(direction);
+    const offset = new THREE.Vector3(delta.x, delta.y, delta.z);
+    const previousFood = this.world.foodPositions.map((position) => position.clone());
+    const previousColors = this.world.foodColors.map((color) => color.clone());
+    const fromSeed = this.currentSeed;
+    try {
+      const room = await this.networkManager.requestPortal(fromSeed, direction, state);
+      const revisit = this.previousRooms.find((previous) => previous.seed === room.seed);
+      if (revisit) {
+        revisit.unwatch();
+        this.sceneManager.removePreviousRoom(revisit.walls);
+        this.sceneManager.scene.remove(revisit.food);
+        this.previousRooms = this.previousRooms.filter((previous) => previous !== revisit);
+      }
+      for (const previous of this.previousRooms) {
+        previous.offset.sub(offset);
+        previous.food.position.sub(offset);
+      }
+      this.sceneManager.shiftPreviousRooms(offset);
+      const walls = this.sceneManager.showPreviousRoom(offset);
+      if (walls) {
+        const previous = {
+          seed: fromSeed, offset: offset.clone().negate(), walls,
+          food: this.createPreviousFood(offset.clone().negate(), previousFood, previousColors),
+          opponents: this.liveOpponents,
+          unwatch: () => {},
+        };
+        this.previousRooms.push(previous);
+        previous.unwatch = this.networkManager.watchRoom(fromSeed, (snapshot) =>
+          this.applyPreviousSnapshot(previous, snapshot));
+      }
+      const segments = this.snake.segments.map((segment) => segment.clone().sub(offset));
+      this.replayRecorder?.stop();
+      this.selectedRoomSeed = room.seed;
+      replaceRoomInAddress(room.seed);
+      this.initializeRoom(room);
+      this.liveOpponents = [];
+      this.snake.applyAuthoritativeState(segments, this.snake.direction, state.speed);
+      this.replayRecorder?.setStartSegments(segments);
+      this.replayRecorder?.setInitialScore(state.score);
+      this.localSnakeInitialized = true;
+      this.score = state.score;
+      this.cameraController.snapToTarget(this.snake.getHead(), this.snake.direction);
+      void this.networkManager.waitForRoomState(room.seed).then((snapshot) =>
+        this.applyLiveSnapshot(snapshot)).catch((error) => console.warn('[Game] Portal room state unavailable:', error));
+    } catch (error) {
+      console.warn('[Game] Portal transfer failed:', error);
+      if (preStepSegments) {
+        this.snake.applyAuthoritativeState(preStepSegments, this.snake.direction, state.speed);
+        this.playerTick = Math.max(0, this.playerTick - 1);
+        this.gameStats.distance = Math.max(0, this.gameStats.distance - 1);
+      }
+    } finally {
+      this.isRoomTransitionPending = false;
+    }
+  }
+
+  private checkCollisions(preStepSegments: THREE.Vector3[] | null) {
     const head = this.snake.getHead();
     const snakeColor = new THREE.Color(0xffffff);
 
     if (this.world.isOutOfBounds(head)) {
+      const portal = this.liveWorld && !this.isSpectating
+        ? crossedPortal(this.positionData(head), this.snake.segments.length)
+        : null;
+      if (portal) {
+        void this.enterPortal(portal, preStepSegments);
+        return;
+      }
       console.log('Game Over: Bounds');
       this.logAction('player.death', {
         tick: this.playerTick,
@@ -2195,6 +2344,7 @@ export class Game {
       this.speedSamples = 0;
 
       this.score = 0;
+      this.clearPreviousRooms();
       this.currentSPM = 300;
       this.snake.setSpeed(60 / this.currentSPM);
       this.particleSystem.clear();
@@ -2355,6 +2505,26 @@ export class Game {
           const instanceIndex = opponent.phantom ? phantomInstanceIndex++ : livePlayerInstanceIndex++;
           mesh.setMatrixAt(instanceIndex, this.dummy.matrix);
           setSnakePatternAt(mesh, instanceIndex, opponent.appearance);
+        }
+      }
+
+      for (const room of this.previousRooms) {
+        const occupiedInRoom = new Set<string>();
+        for (const opponent of room.opponents) {
+          const mesh = opponent.phantom ? this.phantomMesh : this.livePlayerMesh;
+          for (const segmentIndex of getRenderableSegmentIndices(opponent.segments, occupiedInRoom)) {
+            this.dummy.position.copy(opponent.segments[segmentIndex]).add(room.offset);
+            this.dummy.rotation.set(0, 0, 0);
+            if (segmentIndex === 0) this.dummy.quaternion.copy(opponent.direction);
+            this.dummy.scale.set(1, 1, 1);
+            this.dummy.updateMatrix();
+            const instanceIndex = opponent.phantom ? phantomInstanceIndex : livePlayerInstanceIndex;
+            if (instanceIndex >= mesh.instanceMatrix.count) break;
+            if (opponent.phantom) phantomInstanceIndex++;
+            else livePlayerInstanceIndex++;
+            mesh.setMatrixAt(instanceIndex, this.dummy.matrix);
+            setSnakePatternAt(mesh, instanceIndex, opponent.appearance);
+          }
         }
       }
 

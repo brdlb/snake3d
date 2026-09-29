@@ -2,6 +2,15 @@
 /**
  * Interface for Game Statistics displayed in Pause Menu
  */
+import { roomCoordinates } from '../../shared/roomCoordinates';
+
+const roomLabel = (seed: number): string => {
+    const coordinates = roomCoordinates(seed);
+    return coordinates
+        ? `ROOM X ${coordinates.x} · Y ${coordinates.y} · Z ${coordinates.z}`
+        : `ROOM ${seed}`;
+};
+
 export interface GameStats {
     score: number;      // Current score
     length: number;     // Current snake length
@@ -571,7 +580,7 @@ export class PauseUI {
 
     public updateRoom(seed: number) {
         this.roomSeed = seed;
-        this.roomEl.textContent = `You exist in room ${seed}`;
+        this.roomEl.textContent = roomLabel(seed);
     }
 
     public setOrientationLocked(locked: boolean) {
@@ -593,7 +602,7 @@ export class PauseUI {
         } catch {
             this.roomEl.textContent = 'Could not copy invitation link';
         }
-        window.setTimeout(() => { if (this.roomSeed !== null) this.roomEl.textContent = `You exist in room ${this.roomSeed}`; }, 1800);
+        window.setTimeout(() => { if (this.roomSeed !== null) this.roomEl.textContent = roomLabel(this.roomSeed); }, 1800);
     }
 
     private formatTime(seconds: number): string {

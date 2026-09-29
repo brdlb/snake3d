@@ -27,6 +27,8 @@ export interface StartParams {
     initialSpeed: number;  // Начальная скорость (SPM - steps per minute)
     startPosition?: Vec3;  // Точная начальная позиция (для совместимости с изменениями карты)
     startDirection?: Vec3; // Точное начальное направление
+    startSegments?: Vec3[]; // Body carried through a portal
+    initialScore?: number;
 }
 
 // Полные данные реплея

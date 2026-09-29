@@ -5,6 +5,19 @@ import { Phantom } from '../entities/Phantom';
 import type { ReplayData } from '../types/replay';
 
 describe('ReplayPlayer', () => {
+  it('restores the full body of a replay that began after portal travel', () => {
+    const segments = Array.from({ length: 100 }, (_, index) => ({ x: index === 0 ? 0 : -index, y: 25, z: 25 }));
+    const replay: ReplayData = {
+      id: 'portal-replay', playerId: 'player-1', playerName: 'PLAYER', timestamp: 0,
+      finalScore: 200, deathPosition: { x: 1, y: 25, z: 25 }, trajectoryLog: [],
+      startParams: { seed: 1, spawnIndex: 0, initialSpeed: 450,
+        startPosition: segments[0], startDirection: { x: 1, y: 0, z: 0 }, startSegments: segments },
+    };
+    const phantom = new Phantom(replay);
+    expect(phantom.segments).toHaveLength(100);
+    expect(phantom.segments[99]).toEqual(new THREE.Vector3(-99, 25, 25));
+  });
+
   it('uses safe defaults for legacy replays without start parameters', () => {
     const legacyReplay = {
       id: 'legacy-replay',
