@@ -1202,7 +1202,8 @@ button, input { font-family: inherit; }
 :root body .leaderboard-row:not(.header) .col-rank { color: #aaa; }
 :root body .col-score, :root body .col-seed, :root body .col-date { color: #eee; }
 
-:root body .settings-panel { width: min(92vw, 780px); max-height: 88dvh; padding: clamp(18px, 3vw, 34px); transform: none; border: 1px solid #777; }
+:root body .settings-overlay { box-sizing: border-box; overflow-y: auto; padding: 16px; }
+:root body .settings-panel { width: min(100%, 780px); max-height: none; margin: auto; overflow: visible; padding: clamp(18px, 3vw, 34px); transform: none; border: 1px solid #777; }
 :root body .settings-overlay.active .settings-panel { transform: none; }
 :root body .settings-header { border-bottom-color: #777; }
 :root body .settings-header h2 { font: 12px 'Consolas', monospace; letter-spacing: .16em; }
