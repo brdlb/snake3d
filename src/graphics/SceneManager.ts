@@ -89,7 +89,7 @@ export class SceneManager {
             if (!context) return;
             context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
             context.fillStyle = '#ffffff';
-            const fontSize = Math.min(56, Math.max(32, window.innerWidth * 0.05));
+            const fontSize = Math.min(48, Math.max(28, window.innerWidth * 0.045));
             const scale = 3;
             context.font = `300 ${fontSize * scale}px Jura, sans-serif`;
             context.textBaseline = 'middle';
@@ -131,8 +131,8 @@ export class SceneManager {
             );
             face.add(gate);
             this.portalGates.push(gate);
-            const labelWidth = 3.5;
-            const labelHeight = 0.58;
+            const labelWidth = aperture;
+            const labelHeight = 0.5;
             const labelEdge = aperture / 2 + labelHeight / 2;
             const labelGeometry = new THREE.PlaneGeometry(labelWidth, labelHeight);
             const labelMaterial = new THREE.MeshBasicMaterial({ map: this.portalLabelTexture, transparent: true, depthWrite: false, toneMapped: false });
@@ -142,10 +142,10 @@ export class SceneManager {
                 labelSide.position.z = side * 0.04;
                 if (side < 0) labelSide.rotation.y = Math.PI;
                 for (const [x, y, angle] of [
-                    [0, labelEdge, 0],
-                    [0, -labelEdge, 0],
-                    [-labelEdge, 0, Math.PI / 2],
-                    [labelEdge, 0, -Math.PI / 2],
+                    [-aperture / 2 + labelWidth / 2, labelEdge, 0],
+                    [aperture / 2 - labelWidth / 2, -labelEdge, Math.PI],
+                    [-labelEdge, -aperture / 2 + labelWidth / 2, Math.PI / 2],
+                    [labelEdge, aperture / 2 - labelWidth / 2, -Math.PI / 2],
                 ]) {
                     const label = new THREE.Mesh(labelGeometry, labelMaterial);
                     label.position.set(x, y, 0);
