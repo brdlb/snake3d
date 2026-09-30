@@ -136,11 +136,17 @@ export class GameHUD {
 
     public dispose() {
         this.container.remove();
-        const btn = document.querySelector('.hud-pause-btn');
-        if (btn) btn.remove();
+        document.querySelector('.hud-pause-control')?.remove();
     }
 
     public addPauseButton(callback: () => void) {
+        const control = document.createElement('div');
+        control.className = 'hud-pause-control';
+        const version = document.createElement('span');
+        version.className = 'hud-version';
+        control.appendChild(version);
+        void this.loadVersion(version);
+
         const btn = document.createElement('button');
         btn.className = 'hud-pause-btn';
         btn.innerHTML = '||';
@@ -149,7 +155,8 @@ export class GameHUD {
             callback();
         };
 
-        document.body.appendChild(btn);
+        control.appendChild(btn);
+        document.body.appendChild(control);
 
         const style = document.createElement('style');
         style.textContent = `
@@ -189,9 +196,22 @@ export class GameHUD {
         document.head.appendChild(style);
     }
     public togglePauseButton(visible: boolean) {
-        const btn = document.querySelector('.hud-pause-btn') as HTMLElement;
-        if (btn) {
-            btn.style.display = visible ? 'flex' : 'none';
+        const control = document.querySelector('.hud-pause-control') as HTMLElement;
+        if (control) {
+            control.style.display = visible ? 'flex' : 'none';
+        }
+    }
+
+    private async loadVersion(element: HTMLElement) {
+        try {
+            const response = await fetch('/api/v1/version', { cache: 'no-store' });
+            if (!response.ok) return;
+            const data: unknown = await response.json();
+            if (typeof data === 'object' && data !== null && 'id' in data && typeof data.id === 'string') {
+                element.textContent = `VERSION ID: ${data.id.toUpperCase()}`;
+            }
+        } catch {
+            // The version is available only when served by the Cloudflare Worker.
         }
     }
 

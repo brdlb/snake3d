@@ -1163,6 +1163,9 @@ button, input { font-family: inherit; }
 :root body .hud-stat-value { font: 15px 'Consolas', monospace; }
 :root body .mini-map { top: 76px; right: 20px; bottom: auto; left: auto; width: 170px; height: 170px; opacity: 1; border: 1px solid rgba(255,255,255,.8); }
 :root body .hud-pause-btn { top: 20px; right: 20px; width: 35px; height: 35px; border: 1px solid #ccc; background: #030405; border-radius: 0; box-shadow: none; }
+:root body .hud-pause-control { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; align-items: center; gap: 10px; }
+:root body .hud-pause-control .hud-pause-btn { position: static; flex: none; }
+:root body .hud-version { max-width: calc(100vw - 85px); color: rgba(255,255,255,.45); font: 10px 'Consolas', monospace; letter-spacing: .04em; text-align: right; overflow-wrap: anywhere; }
 
 :root body .pause-screen, :root body .game-over-screen { box-sizing: border-box; align-items: flex-start; justify-content: center; gap: 0; padding: clamp(18px, 4vw, 50px); overflow-y: auto; }
 :root body .pause-screen { background: transparent; backdrop-filter: none; }

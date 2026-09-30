@@ -23,6 +23,7 @@ export interface Env {
   DB: D1Database;
   ROOMS: DurableObjectNamespace;
   ASSETS: Fetcher;
+  CF_VERSION_METADATA: WorkerVersionMetadata;
 }
 type User = {
   id: string;
@@ -306,6 +307,11 @@ export default {
     }
     if (request.method !== 'GET' && !mutationAllowed(request))
       return fail('INVALID_ORIGIN', 403, requestId);
+    if (path === '/api/v1/version' && request.method === 'GET') {
+      return new Response(JSON.stringify({ id: env.CF_VERSION_METADATA.id }), {
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+      });
+    }
     if (path === '/api/v1/session' && request.method === 'POST') {
       const token = [...crypto.getRandomValues(new Uint8Array(32))]
           .map((x) => x.toString(16).padStart(2, '0'))
