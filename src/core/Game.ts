@@ -1391,7 +1391,8 @@ export class Game {
       return;
     }
 
-    this.sceneManager.setPortalOpen(this.snake.segments.length >= PORTAL_MIN_LENGTH && this.liveWorld);
+    const portalRemaining = Math.max(0, PORTAL_MIN_LENGTH - this.snake.segments.length);
+    this.sceneManager.setPortalProgress(portalRemaining, portalRemaining === 0);
     this.removeClearedRooms();
 
     // Если ожидаем нажатия кнопки "Старт" — только рендерим сцену

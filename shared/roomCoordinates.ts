@@ -3,7 +3,8 @@ export const ROOM_SIZE = 50;
 export const ROOM_STRIDE = ROOM_SIZE + 1;
 export const PORTAL_MIN_LENGTH = 100;
 export const PORTAL_CENTER = ROOM_SIZE / 2;
-export const PORTAL_APERTURE = 3;
+export const PORTAL_APERTURE = 1;
+export const PORTAL_FRAME_SIZE = 3;
 export const PORTAL_RADIUS = (PORTAL_APERTURE - 1) / 2;
 
 export type RoomCoordinates = { x: number; y: number; z: number };
@@ -53,7 +54,7 @@ export function generationSeed(seed: number): number {
 
 export type GridPosition = { x: number; y: number; z: number };
 
-/** The head must step through one of the nine central cells of a face. */
+/** The head must step through the single central cell of a face. */
 export function crossedPortal(head: GridPosition, length: number): PortalDirection | null {
   if (length < PORTAL_MIN_LENGTH) return null;
   const middle = (a: number, b: number) =>

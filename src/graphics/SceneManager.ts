@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { WallMaterial } from './WallMaterial';
-import { PORTAL_APERTURE } from '../../shared/roomCoordinates';
+import { PORTAL_APERTURE, PORTAL_FRAME_SIZE } from '../../shared/roomCoordinates';
 
 export class SceneManager {
     public renderer: THREE.WebGLRenderer;
@@ -12,8 +12,11 @@ export class SceneManager {
     private directionalLight: THREE.DirectionalLight;
     private wallMesh: THREE.Group | undefined;
     private previousWallMeshes = new Set<THREE.Group>();
-    private portalGates: THREE.Object3D[] = [];
+    private portalGates: THREE.Mesh[] = [];
     private portalLabelTexture: THREE.CanvasTexture | undefined;
+    private portalMaskTexture: THREE.Texture | undefined;
+    private updatePortalLabel?: (remaining: number) => void;
+    private portalRemaining: number | null = null;
 
     constructor(fov: number) {
         // Renderer
@@ -76,6 +79,7 @@ export class SceneManager {
         if (this.wallMesh) this.scene.remove(this.wallMesh);
         const wallSize = size + 1;
         const aperture = PORTAL_APERTURE;
+        const frameSize = PORTAL_FRAME_SIZE;
         const strip = (wallSize - aperture) / 2;
         const center = (wallSize + aperture) / 4;
         this.wallMesh = new THREE.Group();
@@ -85,7 +89,7 @@ export class SceneManager {
         labelCanvas.height = 256;
         const context = labelCanvas.getContext('2d');
         const labelTexture = new THREE.CanvasTexture(labelCanvas);
-        const drawLabel = () => {
+        const drawLabel = (remaining: number) => {
             if (!context) return;
             context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
             context.fillStyle = '#ffffff';
@@ -95,15 +99,26 @@ export class SceneManager {
             context.textBaseline = 'middle';
             const spacing = fontSize * scale * 0.2;
             let x = 24;
-            for (const character of 'LENGTH 100') {
+            for (const character of `LENGTH ${remaining}`) {
                 context.fillText(character, x, labelCanvas.height / 2);
                 x += context.measureText(character).width + spacing;
             }
             labelTexture.needsUpdate = true;
         };
         this.portalLabelTexture = labelTexture;
-        drawLabel();
-        void document.fonts?.ready.then(drawLabel);
+        this.portalRemaining = null;
+        this.updatePortalLabel = drawLabel;
+        this.portalGates = [];
+        if (!this.portalMaskTexture) {
+            this.portalMaskTexture = new THREE.TextureLoader().load('sp.png', (texture) => {
+                texture.colorSpace = THREE.SRGBColorSpace;
+                for (const gate of this.portalGates) {
+                    const material = gate.material as THREE.MeshBasicMaterial;
+                    material.map = texture;
+                    material.needsUpdate = true;
+                }
+            });
+        }
         const faces: Array<[THREE.Vector3, THREE.Euler]> = [
             [new THREE.Vector3(0, 0, wallSize / 2), new THREE.Euler()],
             [new THREE.Vector3(0, 0, -wallSize / 2), new THREE.Euler(0, Math.PI, 0)],
@@ -127,13 +142,12 @@ export class SceneManager {
             addStrip(strip, aperture, -center, 0);
             const gate = new THREE.Mesh(
                 new THREE.PlaneGeometry(aperture, aperture),
-                new THREE.MeshBasicMaterial({ color: 0x24c9ec, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
+                new THREE.MeshBasicMaterial({ color: 0x24c9ec, map: this.portalMaskTexture, transparent: true, side: THREE.DoubleSide, depthWrite: false }),
             );
             face.add(gate);
             this.portalGates.push(gate);
-            const labelWidth = aperture;
+            const labelWidth = frameSize;
             const labelHeight = 0.5;
-            const labelEdge = aperture / 2 + labelHeight / 2;
             const labelGeometry = new THREE.PlaneGeometry(labelWidth, labelHeight);
             const labelMaterial = new THREE.MeshBasicMaterial({ map: this.portalLabelTexture, transparent: true, depthWrite: false, toneMapped: false });
             // Put one label along every edge of the opening, on both sides of the wall.
@@ -142,10 +156,10 @@ export class SceneManager {
                 labelSide.position.z = side * 0.04;
                 if (side < 0) labelSide.rotation.y = Math.PI;
                 for (const [x, y, angle] of [
-                    [-aperture / 2 + labelWidth / 2, labelEdge, 0],
-                    [aperture / 2 - labelWidth / 2, -labelEdge, Math.PI],
-                    [-labelEdge, -aperture / 2 + labelWidth / 2, Math.PI / 2],
-                    [labelEdge, aperture / 2 - labelWidth / 2, -Math.PI / 2],
+                    [-frameSize / 2 + labelWidth / 2, frameSize / 2 + labelHeight / 2, 0],
+                    [frameSize / 2 - labelWidth / 2, -frameSize / 2 - labelHeight / 2, Math.PI],
+                    [-frameSize / 2 - labelHeight / 2, -frameSize / 2 + labelWidth / 2, Math.PI / 2],
+                    [frameSize / 2 + labelHeight / 2, frameSize / 2 - labelWidth / 2, -Math.PI / 2],
                 ]) {
                     const label = new THREE.Mesh(labelGeometry, labelMaterial);
                     label.position.set(x, y, 0);
@@ -153,6 +167,23 @@ export class SceneManager {
                     labelSide.add(label);
                 }
                 face.add(labelSide);
+
+                const cornerThickness = 0.04;
+                const cornerLength = 0.55;
+                const cornerZ = side * 0.055;
+                const cornerMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, toneMapped: false });
+                for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+                    const horizontal = new THREE.Mesh(
+                        new THREE.BoxGeometry(cornerLength, cornerThickness, cornerThickness), cornerMaterial,
+                    );
+                    horizontal.position.set(sx * (frameSize / 2 - cornerLength / 2), sy * frameSize / 2, cornerZ);
+                    labelSide.add(horizontal);
+                    const vertical = new THREE.Mesh(
+                        new THREE.BoxGeometry(cornerThickness, cornerLength, cornerThickness), cornerMaterial,
+                    );
+                    vertical.position.set(sx * frameSize / 2, sy * (frameSize / 2 - cornerLength / 2), cornerZ);
+                    labelSide.add(vertical);
+                }
             }
             this.wallMesh.add(face);
         }
@@ -160,8 +191,16 @@ export class SceneManager {
         this.scene.add(this.wallMesh);
     }
 
-    public setPortalOpen(open: boolean): void {
-        for (const gate of this.portalGates) gate.visible = !open;
+    public setPortalProgress(remaining: number, open: boolean): void {
+        if (this.portalRemaining !== remaining) {
+            this.portalRemaining = remaining;
+            this.updatePortalLabel?.(remaining);
+        }
+        const color = open ? 0xffffff : 0x24c9ec;
+        for (const gate of this.portalGates) {
+            gate.visible = true;
+            (gate.material as THREE.MeshBasicMaterial).color.setHex(color);
+        }
     }
 
     public shiftPreviousRooms(offset: THREE.Vector3): void {
@@ -210,5 +249,6 @@ export class SceneManager {
             });
         }
         this.portalLabelTexture?.dispose();
+        this.portalMaskTexture?.dispose();
     }
 }
