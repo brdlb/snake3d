@@ -11,7 +11,7 @@ import {
   type SimulationState,
 } from '../shared/simulation';
 import { createRandomSnakeAppearance, isSnakeAppearance, normalizeSnakeAppearance, type SnakeAppearance } from '../shared/appearance';
-import { adjacentRoom, crossedPortal, portalOffset, roomCoordinates, roomSeed, PORTAL_MIN_LENGTH, type PortalDirection } from '../shared/roomCoordinates';
+import { adjacentRoom, crossedPortal, portalOffset, roomCoordinates, roomSeed, FIRST_ROOM_SEED, PORTAL_MIN_LENGTH, type PortalDirection } from '../shared/roomCoordinates';
 import type { PauseInput } from '../shared/realtime';
 import type {
   DeathInput,
@@ -222,6 +222,11 @@ async function createRoomSeed(env: Env, user: User) {
   }
   throw new Error('ROOM_COORDINATES_EXHAUSTED');
 }
+async function ensureFirstRoom(env: Env, user: User) {
+  await env.DB.prepare('INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)')
+    .bind(FIRST_ROOM_SEED, Math.floor(user.elo / 100), now()).run();
+  return FIRST_ROOM_SEED;
+}
 export function parseRoomSeed(value: string | null) {
   if (value === null || !/^\d+$/.test(value)) return null;
   const seed = Number(value);
@@ -253,32 +258,10 @@ export function chooseSpawn(
   }
   return previousSpawnIndex === undefined ? 0 : (previousSpawnIndex + 1) % 4;
 }
-export function rankNextRooms<T extends { averageElo: number; phantomCount: number }>(
-  rooms: T[],
-  playerElo: number,
-  random = Math.random,
-) {
-  return [...rooms].sort(
-    (a, b) =>
-      Math.abs(a.averageElo - playerElo) - Math.abs(b.averageElo - playerElo) ||
-      b.phantomCount - a.phantomCount ||
-      random() - 0.5,
-  );
-}
-
 export function replayReplacementOrder(replaySaved: boolean, evictRoomReplay: boolean) {
   if (!replaySaved) return [];
   return [...(evictRoomReplay ? ['deleteRoomMinimum'] : []), 'insertReplay'] as const;
 }
-
-export const ROOM_REPLAYS_QUERY = `SELECT payload_json FROM (
-  SELECT payload_json, ROW_NUMBER() OVER (
-    PARTITION BY json_extract(payload_json, '$.startParams.spawnIndex')
-    ORDER BY score DESC, created_at ASC
-  ) AS spawn_rank
-  FROM replays
-  WHERE room_seed=?
-) WHERE spawn_rank=1`;
 
 export const ROOM_LIST_QUERY = `SELECT
   r.seed AS seed,
@@ -389,22 +372,7 @@ export default {
       );
     }
     if (path === '/api/v1/rooms/enter' && request.method === 'GET') {
-      const rows = await env.DB.prepare(
-        'SELECT r.seed, EXISTS(SELECT 1 FROM replays p WHERE p.room_seed=r.seed) AS has_record FROM rooms r WHERE r.seed>=2147483648',
-      ).all<{ seed: number; has_record: number }>();
-      if (rows.results.length === 0) return json({ seed: await createRoomSeed(env, user) }, 200, requestId);
-      const counts = await Promise.all(rows.results.map(async (row) => {
-        const seed = Number(row.seed);
-        const response = await env.ROOMS.get(env.ROOMS.idFromName(String(seed))).fetch('https://room/occupancy');
-        return { seed, count: (await response.json<{ count: number }>()).count, hasRecord: Boolean(row.has_record) };
-      }));
-      const most = Math.max(...counts.map((room) => room.count));
-      if (most === 0 && !counts.some((room) => room.hasRecord))
-        return json({ seed: await createRoomSeed(env, user) }, 200, requestId);
-      const choices = most > 0
-        ? counts.filter((room) => room.count === most)
-        : counts.filter((room) => room.hasRecord);
-      return json({ seed: choices[Math.floor(Math.random() * choices.length)].seed }, 200, requestId);
+      return json({ seed: await ensureFirstRoom(env, user) }, 200, requestId);
     }
     if (path === '/api/v1/rooms/stats' && request.method === 'GET') {
       const totals = await env.DB.prepare(
@@ -784,9 +752,9 @@ export class RoomDurableObject {
             position: player.segments[0], direction: player.direction, up: player.up },
         },
       });
-      return json(await this.roomData(seed, user, true, {
+      return json(await this.roomData(seed, user, {
         position: incoming.segments[0], direction: incoming.direction, up: incoming.up,
-      }, incoming.segments));
+      }));
     }
     if (path === '/portal-leave') {
       const { userId } = await request.json<{ userId: string }>();
@@ -823,7 +791,7 @@ export class RoomDurableObject {
           ? this.spectate(data)
           : new Response('Not found', { status: 404 });
   }
-  private async restorePhantoms(state: SimulationState) {
+  private removePhantoms(state: SimulationState) {
     const restartingUserId = this.restartUserId;
     if (restartingUserId) {
       const anotherOnlinePlayer = this.ctx.getWebSockets().some((socket) => {
@@ -834,94 +802,32 @@ export class RoomDurableObject {
         return attachment?.userId !== restartingUserId && !attachment?.spectator;
       });
       this.restartUserId = null;
-      if (anotherOnlinePlayer) return;
-    } else {
-      if (Object.values(state.players).some((player) => player.alive && !player.phantom)) return;
-      if (Object.values(state.players).some((player) => player.phantom)) return;
+      if (!anotherOnlinePlayer)
+        for (const [entityId, player] of Object.entries(state.players))
+          if (player.id === restartingUserId && !player.phantom) delete state.players[entityId];
     }
-    const reserved = new Set<number>();
-    const assignments = await this.env.DB.prepare(
-      'SELECT spawn_index FROM room_assignments WHERE room_seed=?',
-    )
-      .bind(state.seed)
-      .all<{ spawn_index: number }>();
-    for (const assignment of assignments.results) reserved.add(assignment.spawn_index);
-    for (const player of Object.values(state.players).filter((player) => !player.phantom)) {
-      const assignment = await this.env.DB.prepare(
-        'SELECT spawn_index FROM room_assignments WHERE room_seed=? AND user_id=?',
-      )
-        .bind(state.seed, player.id)
-        .first<{ spawn_index: number }>();
-      if (assignment && Number.isInteger(assignment.spawn_index))
-        reserved.add(assignment.spawn_index);
-    }
-    if (restartingUserId)
-      for (const [entityId, player] of Object.entries(state.players))
-        if (player.id === restartingUserId && !player.phantom) delete state.players[entityId];
     for (const id of Object.keys(state.players))
       if (state.players[id].phantom) delete state.players[id];
-    const replays = await this.activeReplays(state.seed);
-    for (const row of replays.results)
-      try {
-        const replay = JSON.parse(row.payload_json);
-        const spawnIndex = replay.startParams?.spawnIndex;
-        if (reserved.has(spawnIndex)) continue;
-        addPlayer(state, `phantom:${replay.id}`, replay.playerName ?? 'Phantom', Date.now(), {
-          spawnIndex,
-          entityId: `phantom:${replay.id}:${crypto.randomUUID()}`,
-          phantom: true,
-          score: Number(replay.finalScore ?? 0),
-          color: '#7dd3fc',
-          appearance: replay.appearance,
-          startPosition: replay.startParams?.startPosition,
-          direction: replay.startParams?.startDirection,
-        });
-      } catch {
-        /* Ignore malformed historical replays. */
-      }
   }
   private async loadState(seed: number) {
     this.simulation ??=
       (await this.ctx.storage.get<SimulationState>('simulation')) ?? createSimulation(seed);
     for (const player of Object.values(this.simulation.players)) player.paused ??= false;
+    this.removePhantoms(this.simulation);
     return this.simulation;
   }
   private async prepareState(seed: number) {
     const state = await this.loadState(seed);
-    await this.restorePhantoms(state);
     return state;
   }
-  // Realtime messages reuse the loaded simulation; restore replay phantoms only
-  // when the Durable Object wakes up or a player explicitly restarts.
   private async liveState(seed: number) {
-    const needsPreparation = this.simulation === null || this.restartUserId !== null;
-    const state = await this.loadState(seed);
-    if (needsPreparation) await this.restorePhantoms(state);
-    return state;
-  }
-  private async createRoom(user: User) {
-    return createRoomSeed(this.env, user);
-  }
-  private async activeReplays(seed: number, excludePlayerId?: string) {
-    const replays = await this.env.DB.prepare(ROOM_REPLAYS_QUERY)
-      .bind(seed)
-      .all<{ payload_json: string }>();
-    if (!excludePlayerId) return replays;
-    return {
-      ...replays,
-      results: replays.results.filter(
-        (row) => JSON.parse(row.payload_json).playerId !== excludePlayerId,
-      ),
-    };
+    return this.loadState(seed);
   }
   private async roomData(
     seed: number,
     user: User,
-    excludeAssignedSpawn = false,
     playerSpawn?: RoomData['playerSpawn'],
-    playerSegments: Axis[] = [],
   ): Promise<RoomData> {
-    const replays = await this.activeReplays(seed);
     const assignment = await this.env.DB.prepare(
       'SELECT spawn_index FROM room_assignments WHERE user_id=? AND room_seed=?',
     )
@@ -930,42 +836,10 @@ export class RoomDurableObject {
     const playerSpawnIndex = assignment?.spawn_index ?? 0;
     return {
       seed,
-      phantoms: replays.results
-        .map((r) => JSON.parse(r.payload_json))
-        .filter(
-          (replay) =>
-            !excludeAssignedSpawn ||
-            (replay.startParams?.spawnIndex !== playerSpawnIndex &&
-              !playerSegments.some((segment) => {
-                const start = replay.startParams?.startPosition;
-                return (
-                  start &&
-                  start.x === segment.x &&
-                  start.y === segment.y &&
-                  start.z === segment.z
-                );
-              })),
-        ),
+      phantoms: [],
       playerSpawnIndex,
       playerSpawn,
     };
-  }
-  private async selectRoom(user: User) {
-    const candidates = await this.env.DB.prepare(
-      `SELECT r.seed AS seed, COALESCE(AVG(CAST(json_extract(p.payload_json,'$.elo') AS REAL)),1000) AS average_elo, COUNT(p.id) AS phantom_count FROM rooms r LEFT JOIN replays p ON p.room_seed=r.seed WHERE r.seed>=2147483648 AND NOT EXISTS (SELECT 1 FROM user_room_visits v WHERE v.user_id=? AND v.room_seed=r.seed) GROUP BY r.seed`,
-    )
-      .bind(user.id)
-      .all<{ seed: number; average_elo: number; phantom_count: number }>();
-    return (
-      rankNextRooms(
-        candidates.results.map((row) => ({
-          seed: Number(row.seed),
-          averageElo: Number(row.average_elo),
-          phantomCount: Number(row.phantom_count),
-        })),
-        user.elo,
-      )[0]?.seed ?? (await this.createRoom(user))
-    );
   }
   private async assign({
     action,
@@ -977,7 +851,7 @@ export class RoomDurableObject {
     user: User;
   }) {
     if (action === 'spectate')
-      return json(await this.roomData(contextSeed ?? (await this.selectRoom(user)), user));
+      return json(await this.roomData(contextSeed ?? (await ensureFirstRoom(this.env, user)), user));
     const current = await this.env.DB.prepare(
       'SELECT room_seed,spawn_index FROM room_assignments WHERE user_id=?',
     )
@@ -990,11 +864,12 @@ export class RoomDurableObject {
       return json({ error: { code: 'ROOM_CONTEXT_MISMATCH' } }, 409);
     let seed: number;
     if (action === 'restart') seed = current!.room_seed;
-    else if (action === 'resume' || action === 'initial') {
+    else if (action === 'initial') seed = await ensureFirstRoom(this.env, user);
+    else if (action === 'resume') {
       const last = await this.env.DB.prepare('SELECT last_room_seed FROM users WHERE id=?')
         .bind(user.id)
         .first<{ last_room_seed: number | null }>();
-      seed = last?.last_room_seed ?? (await this.createRoom(user));
+      seed = last?.last_room_seed ?? (await ensureFirstRoom(this.env, user));
     } else if (action === 'next') {
       const source = roomCoordinates(current!.room_seed);
       const target = source ? adjacentRoom(source, 'xp') : { x: 0, y: 0, z: 0 };
@@ -1002,17 +877,8 @@ export class RoomDurableObject {
       catch { return json({ error: { code: 'WORLD_EDGE' } }, 409); }
       await this.env.DB.prepare('INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)')
         .bind(seed, Math.floor(user.elo / 100), now()).run();
-    } else {
-      seed = await this.selectRoom(user);
-    }
-    // Keep the restarting player's saved replay in the occupancy set. Excluding
-    // it can make an already recorded spawn look free and hide that replay when
-    // roomData removes the newly assigned spawn from the phantom list.
-    const existing = await this.activeReplays(seed);
-    const spawn = chooseSpawn(
-      existing.results.map((row) => JSON.parse(row.payload_json)),
-      action === 'restart' ? current!.spawn_index : undefined,
-    );
+    } else return json({ error: { code: 'INVALID_ROOM_ACTION' } }, 400);
+    const spawn = chooseSpawn([], action === 'restart' ? current!.spawn_index : undefined);
     const time = now();
     await this.env.DB.batch([
       this.env.DB.prepare(
@@ -1031,14 +897,13 @@ export class RoomDurableObject {
       ).bind(seed, user.id, spawn, time),
       this.env.DB.prepare('UPDATE rooms SET updated_at=? WHERE seed=?').bind(time, seed),
     ]);
-    return json(await this.roomData(seed, user, true));
+    return json(await this.roomData(seed, user));
   }
   private async join({ user, seed }: { user: User; seed: number }) {
     const exists = await this.env.DB.prepare('SELECT 1 FROM rooms WHERE seed=?').bind(seed).first();
     if (!exists) return json({ error: { code: 'ROOM_NOT_FOUND' } }, 404);
     const state = await this.prepareState(seed);
-    const existing = await this.activeReplays(seed, user.id);
-    const spawn = chooseSpawn(existing.results.map((row) => JSON.parse(row.payload_json)));
+    const spawn = chooseSpawn([]);
     let availableSpawn = safeSpawn(state, undefined, spawn);
     if (!availableSpawn.safe) {
       const weakest = chooseLowestPhantom(Object.values(state.players));
@@ -1102,13 +967,11 @@ export class RoomDurableObject {
       await this.roomData(
         seed,
         user,
-        true,
         {
           position: player.segments[0],
           direction: player.direction,
           up: player.up,
         },
-        player.segments,
       ),
     );
   }

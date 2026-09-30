@@ -264,9 +264,6 @@ export class Game {
       () => {
         void this.resetGame('restart');
       },
-      () => {
-        void this.resetGame('next');
-      },
       () => this.leaderboardUI.show(),
       () => {
         if (!this.pendingDeathAction) return;
@@ -729,7 +726,7 @@ export class Game {
     // Инициализируем AudioContext по клику пользователя
     if (mode === 'player') await this.soundManager.initAudio();
 
-    // Запрашиваем комнату с сервера (null = случайный seed)
+    // Request the room from the server (null = first cube).
     this.isSpectating = mode === 'spectator';
     if (this.networkManager.isConnected()) {
       const requestedSeed = new URLSearchParams(window.location.search).get('room');
@@ -746,7 +743,6 @@ export class Game {
         // The socket can deliver its initial snapshot before room initialization
         // finishes. Request one more snapshot after the local room is ready.
         if (this.liveWorld) this.networkManager.requestResync();
-        if (!this.isSpectating) this.cachePhantomsForOffline(room.phantoms);
       } catch (error) {
         console.warn('[Game] Failed to enter online room, falling back to local game:', error);
         await this.initializeOfflineRoom();
@@ -1226,68 +1222,14 @@ export class Game {
     if (this.snake.segments.length > length) this.snake.segments.length = length;
   }
 
-  /**
-   * Инициализация комнаты в оффлайн режиме с кэшированными фантомами
-   */
+  /** Initialize an offline room without replay phantoms. */
   private async initializeOfflineRoom(): Promise<void> {
     this.liveWorld = false;
     this.isSpectating = false;
     const localSeed = Math.floor(Math.random() * 1000000);
     const localSpawnIndex = getRandomSpawnIndex();
 
-    try {
-      // Пытаемся загрузить кэшированные фантомы
-      const cachedPhantoms = await this.loadCachedPhantoms();
-
-      this.initializeRoom({
-        seed: localSeed,
-        phantoms: cachedPhantoms,
-        playerSpawnIndex: localSpawnIndex,
-      });
-
-      console.log(`[Game] Offline room initialized with ${cachedPhantoms.length} cached phantoms`);
-    } catch (error) {
-      console.warn('[Game] Failed to load cached phantoms, starting with empty room:', error);
-      this.initializeRoom({ seed: localSeed, phantoms: [], playerSpawnIndex: localSpawnIndex });
-    }
-  }
-
-  /**
-   * Загрузка кэшированных фантомов из IndexedDB
-   */
-  private async loadCachedPhantoms(): Promise<any[]> {
-    try {
-      const cachedData = await this.offlineManager.getGameData('cachedPhantoms');
-      if (cachedData && cachedData.phantoms && Array.isArray(cachedData.phantoms)) {
-        // Проверяем, не устарели ли данные (кэш на 24 часа)
-        const cacheAge = Date.now() - (cachedData.timestamp || 0);
-        const MAX_CACHE_AGE = 24 * 60 * 60 * 1000; // 24 часа
-
-        if (cacheAge < MAX_CACHE_AGE) {
-          return cachedData.phantoms;
-        } else {
-          console.log('[Game] Cached phantoms are too old, will use empty room');
-        }
-      }
-    } catch (error) {
-      console.error('[Game] Error loading cached phantoms:', error);
-    }
-    return [];
-  }
-
-  /**
-   * Кэширование фантомов для использования в оффлайн режиме
-   */
-  private async cachePhantomsForOffline(phantoms: any[]): Promise<void> {
-    try {
-      await this.offlineManager.saveGameData('cachedPhantoms', {
-        phantoms: phantoms,
-        timestamp: Date.now(),
-      });
-      console.log(`[Game] Cached ${phantoms.length} phantoms for offline play`);
-    } catch (error) {
-      console.error('[Game] Failed to cache phantoms:', error);
-    }
+    this.initializeRoom({ seed: localSeed, phantoms: [], playerSpawnIndex: localSpawnIndex });
   }
 
   private onWindowResize() {
@@ -2310,7 +2252,7 @@ export class Game {
 
   private isRoomTransitionPending: boolean = false;
 
-  private async resetGame(action: 'restart' | 'next') {
+  private async resetGame(action: 'restart') {
     if (this.isRoomTransitionPending) return;
     this.isRoomTransitionPending = true;
     this.gameOverUI.setLoading(true);
@@ -2362,9 +2304,8 @@ export class Game {
         replaceRoomInAddress(room.seed);
         this.initializeRoom(room);
         if (snapshot) this.applyLiveSnapshot(snapshot);
-        this.cachePhantomsForOffline(room.phantoms);
       } else {
-        // Offline mode - use cached phantoms or empty room
+        // Offline mode starts without replay phantoms.
         await this.initializeOfflineRoom();
       }
       this.gameOverUI.hide();

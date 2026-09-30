@@ -50,7 +50,7 @@ export class WelcomeScreen {
         const stats = document.createElement('p');
         stats.className = 'welcome-stats';
         stats.setAttribute('aria-live', 'polite');
-        stats.textContent = 'PHANTOMS —  ·  ROOMS —  ·  PLAYERS ONLINE —';
+        stats.textContent = 'ROOMS —  ·  PLAYERS ONLINE —';
         content.appendChild(stats);
         container.appendChild(content);
         return container;
@@ -59,9 +59,9 @@ export class WelcomeScreen {
     private async loadStats(): Promise<void> {
         if (!networkManager.isConnected()) return;
         try {
-            const { phantoms, rooms, playersOnline } = await networkManager.requestRoomStats();
+            const { rooms, playersOnline } = await networkManager.requestRoomStats();
             const stats = this.container.querySelector<HTMLElement>('.welcome-stats');
-            if (stats) stats.textContent = `PHANTOMS ${phantoms}  ·  ROOMS ${rooms}  ·  PLAYERS ONLINE ${playersOnline}`;
+            if (stats) stats.textContent = `ROOMS ${rooms}  ·  PLAYERS ONLINE ${playersOnline}`;
         } catch (error) {
             console.warn('[Welcome] Unable to load room stats:', error);
         }

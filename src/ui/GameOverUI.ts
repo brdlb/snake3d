@@ -4,7 +4,6 @@ export class GameOverUI {
     private container!: HTMLElement;
     private content!: HTMLElement;
     private restartBtn!: HTMLButtonElement;
-    private nextBtn!: HTMLButtonElement;
     private retrySaveBtn!: HTMLButtonElement;
     private errorEl!: HTMLElement;
     private saveStatusEl!: HTMLElement;
@@ -22,15 +21,13 @@ export class GameOverUI {
     private foodPinkEl!: HTMLElement;
 
     private onRestart: () => void;
-    private onNext: () => void;
     private onLeaderboard: () => void;
     private onRetrySave: () => void;
     private resizeObserver?: ResizeObserver;
     private readonly onWindowResize = () => this.updateScale();
 
-    constructor(onRestart: () => void, onNext: () => void, onLeaderboard: () => void, onRetrySave: () => void) {
+    constructor(onRestart: () => void, onLeaderboard: () => void, onRetrySave: () => void) {
         this.onRestart = onRestart;
-        this.onNext = onNext;
         this.onLeaderboard = onLeaderboard;
         this.onRetrySave = onRetrySave;
         this.createUI();
@@ -55,12 +52,6 @@ export class GameOverUI {
             if (this.container.classList.contains('active')) {
                 this.onRestart();
             }
-        });
-        this.nextBtn = document.createElement('button');
-        this.nextBtn.className = 'restart-btn next-btn';
-        this.nextBtn.textContent = 'NEXT';
-        this.nextBtn.addEventListener('click', () => {
-            if (this.container.classList.contains('active')) this.onNext();
         });
 
         // Wrapper for the sliding effect (Title)
@@ -121,11 +112,7 @@ export class GameOverUI {
 
         this.content.appendChild(leadersBtn);
 
-        this.nextBtn.style.transitionDelay = '0.3s';
-        this.content.appendChild(this.nextBtn);
-
-        // Update restart button delay to come after leaderboard
-        this.restartBtn.style.transitionDelay = '0.4s';
+        this.restartBtn.style.transitionDelay = '0.3s';
         this.content.appendChild(this.restartBtn);
 
         this.retrySaveBtn = document.createElement('button');
@@ -288,10 +275,8 @@ export class GameOverUI {
 
     public setLoading(loading: boolean, error?: string) {
         this.restartBtn.disabled = loading;
-        this.nextBtn.disabled = loading;
         if (loading) this.retrySaveBtn.hidden = true;
         this.restartBtn.textContent = loading ? 'SAVING…' : 'RESTART';
-        this.nextBtn.textContent = loading ? 'PLEASE WAIT…' : 'NEXT';
         this.errorEl.hidden = !error;
         this.errorEl.textContent = error ?? '';
         requestAnimationFrame(() => this.updateScale());

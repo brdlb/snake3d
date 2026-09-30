@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { chooseSpawn, parseRoomSeed, rankNextRooms, replayReplacementOrder, ROOM_LIST_QUERY, ROOM_REPLAYS_QUERY, RoomDurableObject } from './index';
+import worker, { chooseSpawn, parseRoomSeed, replayReplacementOrder, ROOM_LIST_QUERY, RoomDurableObject } from './index';
 import { addPlayer, createSimulation } from '../shared/simulation';
-import { roomSeed } from '../shared/roomCoordinates';
+import { FIRST_ROOM_SEED, roomSeed } from '../shared/roomCoordinates';
 
 describe('portal room transfer', () => {
   const user = {
@@ -54,23 +54,25 @@ describe('room selection rules', () => {
     expect(parseRoomSeed('12.2')).toBeNull();
     expect(parseRoomSeed('9007199254740992')).toBeNull();
   });
-  it('prefers ELO distance, then occupied phantom count', () => {
-    const rooms = rankNextRooms([
-      { id: 'far', averageElo: 1200, phantomCount: 3 },
-      { id: 'less-full', averageElo: 1000, phantomCount: 1 },
-      { id: 'full', averageElo: 1000, phantomCount: 3 },
-    ], 1000, () => 0.5);
-    expect(rooms.map(room => room.id)).toEqual(['full', 'less-full', 'far']);
-  });
-
-  it('breaks equal candidates randomly', () => {
-    const random = vi.fn().mockReturnValueOnce(0.9).mockReturnValueOnce(0.1);
-    const rooms = rankNextRooms([
-      { id: 'a', averageElo: 1000, phantomCount: 2 },
-      { id: 'b', averageElo: 1000, phantomCount: 2 },
-    ], 1000, random);
-    expect(random).toHaveBeenCalled();
-    expect(new Set(rooms.map(room => room.id))).toEqual(new Set(['a', 'b']));
+  it('sends every default entrant to the first cube without checking room occupancy', async () => {
+    const player = {
+      id: 'player-1', username: 'PLAYER', created_at: '', last_seen: '', high_score: 0,
+      games_played: 0, total_score: 0, elo: 1000, settings_json: '{}',
+    };
+    const insert = vi.fn().mockResolvedValue({ meta: { changes: 1 } });
+    const prepare = vi.fn(() => ({
+      bind: vi.fn(() => ({ first: vi.fn().mockResolvedValue(player), run: insert })),
+    }));
+    const env = { DB: { prepare }, ROOMS: { get: vi.fn() } } as any;
+    for (const token of ['first', 'second']) {
+      const response = await worker.fetch(new Request('https://snake.example/api/v1/rooms/enter', {
+        headers: { cookie: `snake3d_session=${token}` },
+      }), env);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ seed: FIRST_ROOM_SEED });
+    }
+    expect(insert).toHaveBeenCalledTimes(2);
+    expect(env.ROOMS.get).not.toHaveBeenCalled();
   });
 
   it('uses a free spawn and otherwise evicts the lowest-score phantom spawn', () => {
@@ -104,17 +106,6 @@ describe('room selection rules', () => {
     expect(replayReplacementOrder(true, true)).toEqual(['deleteRoomMinimum', 'insertReplay']);
   });
 
-  it('returns the best saved replay for each spawn in a room', () => {
-    expect(ROOM_REPLAYS_QUERY).toContain('WHERE room_seed=?');
-    expect(ROOM_REPLAYS_QUERY).toContain('PARTITION BY json_extract(payload_json');
-    expect(ROOM_REPLAYS_QUERY).toContain('ROW_NUMBER()');
-    expect(ROOM_REPLAYS_QUERY).not.toContain('LIMIT 3');
-  });
-
-  it('keeps the replay query scoped to a room for authoritative terminal records', () => {
-    expect(ROOM_REPLAYS_QUERY).toContain('room_seed=?');
-  });
-
   it('lists room play counts and the best score for every spawn', () => {
     expect(ROOM_LIST_QUERY).toContain('r.total_games_played AS gamesPlayed');
     expect(ROOM_LIST_QUERY).toContain('room_spawn_records');
@@ -141,68 +132,40 @@ describe('room state preparation', () => {
     expect(prepare).not.toHaveBeenCalled();
   });
 
-  it('prepares phantoms once and reuses them for subsequent realtime messages', async () => {
-    const { object, prepare } = room();
+  it('removes replay phantoms from a saved room while keeping live players', async () => {
+    const state = createSimulation(123);
+    addPlayer(state, 'player-1', 'PLAYER', 0);
+    addPlayer(state, 'phantom:old-replay', 'PHANTOM', 0, { phantom: true });
+    const storage = { get: vi.fn().mockResolvedValue(state) };
+    const prepare = vi.fn();
+    const object = new RoomDurableObject(
+      { storage, getWebSockets: () => [] } as any,
+      { DB: { prepare } } as any,
+    );
 
-    await (object as any).liveState(123);
-    expect(prepare).toHaveBeenCalledTimes(2);
+    const loaded = await (object as any).liveState(123);
 
-    prepare.mockClear();
-    await (object as any).liveState(123);
-
+    expect(Object.values(loaded.players).map((player: any) => player.id)).toEqual(['player-1']);
     expect(prepare).not.toHaveBeenCalled();
   });
 
-  it('includes a player replay when restart assigned that player another spawn', async () => {
-    const replay = { playerId: 'player-1', startParams: { spawnIndex: 0 } };
-    const prepare = vi.fn((query: string) => ({
-      bind: () =>
-        query === ROOM_REPLAYS_QUERY
-          ? { all: vi.fn().mockResolvedValue({ results: [{ payload_json: JSON.stringify(replay) }] }) }
-          : { first: vi.fn().mockResolvedValue({ spawn_index: 1 }) },
-    }));
-    const object = new RoomDurableObject(
-      { storage: { get: vi.fn() }, getWebSockets: () => [] } as any,
-      { DB: { prepare } } as any,
-    );
+  it('keeps realtime state free of replay reads', async () => {
+    const { object, prepare } = room();
 
-    const room = await (object as any).roomData(123, { id: 'player-1' }, true);
-
-    expect(room.phantoms).toEqual([replay]);
+    await (object as any).liveState(123);
+    await (object as any).liveState(123);
+    expect(prepare).not.toHaveBeenCalled();
   });
 
-  it('excludes a replay whose recorded start overlaps the actual player body', async () => {
-    const replay = {
-      id: 'bad-replay',
-      startParams: { spawnIndex: 3, startPosition: { x: 5, y: 5, z: 5 } },
-    };
-    const prepare = vi.fn((query: string) => ({
-      bind: () =>
-        query === ROOM_REPLAYS_QUERY
-          ? { all: vi.fn().mockResolvedValue({ results: [{ payload_json: JSON.stringify(replay) }] }) }
-          : { first: vi.fn().mockResolvedValue({ spawn_index: 0 }) },
-    }));
-    const object = new RoomDurableObject(
-      { storage: { get: vi.fn() }, getWebSockets: () => [] } as any,
-      { DB: { prepare } } as any,
-    );
-
-    const room = await (object as any).roomData(
-      123,
-      { id: 'player-1' },
-      true,
-      undefined,
-      [
-        { x: 5, y: 5, z: 5 },
-        { x: 5, y: 5, z: 4 },
-        { x: 5, y: 5, z: 3 },
-      ],
-    );
-
-    expect(room.phantoms).toEqual([]);
+  it('returns no replay phantoms in room data', async () => {
+    const { object, prepare } = room();
+    prepare.mockReturnValue({ bind: () => ({ first: vi.fn().mockResolvedValue({ spawn_index: 0 }) }) });
+    const data = await (object as any).roomData(123, { id: 'player-1' });
+    expect(data.phantoms).toEqual([]);
+    expect(prepare).toHaveBeenCalledTimes(1);
   });
 
-  it('counts the restarting player replay when assigning a free spawn', async () => {
+  it('assigns restart without loading saved replays', async () => {
     const statements: Array<{ query: string; args: unknown[] }> = [];
     const prepare = vi.fn((query: string) => ({
       bind: (...args: unknown[]) =>
@@ -214,13 +177,6 @@ describe('room state preparation', () => {
       { storage: { get: vi.fn() }, getWebSockets: () => [] } as any,
       { DB: { prepare, batch: vi.fn(async (batch) => statements.push(...batch)) } } as any,
     );
-    const replays = [0, 1, 2].map((spawnIndex, index) => ({
-      playerId: index === 1 ? 'player-1' : `player-${index + 2}`,
-      startParams: { spawnIndex },
-    }));
-    const activeReplays = vi
-      .spyOn(object as any, 'activeReplays')
-      .mockResolvedValue({ results: replays.map((replay) => ({ payload_json: JSON.stringify(replay) })) });
     vi.spyOn(object as any, 'roomData').mockResolvedValue({
       seed: 123,
       phantoms: [],
@@ -233,11 +189,11 @@ describe('room state preparation', () => {
       user: { id: 'player-1', username: 'Player', elo: 1000 },
     });
 
-    expect(activeReplays).toHaveBeenCalledWith(123);
+    expect(prepare).not.toHaveBeenCalledWith(expect.stringContaining('FROM replays'));
     expect(
       statements.find((statement) => statement.query.startsWith('INSERT INTO room_assignments'))
         ?.args[2],
-    ).toBe(3);
+    ).not.toBe(1);
   });
 
   it('persists the actual safe spawn selected around a live player', async () => {
@@ -255,7 +211,6 @@ describe('room state preparation', () => {
       { DB: { prepare, batch: vi.fn(async (batch) => statements.push(...batch)) } } as any,
     );
     vi.spyOn(object as any, 'prepareState').mockResolvedValue(state);
-    vi.spyOn(object as any, 'activeReplays').mockResolvedValue({ results: [] });
     vi.spyOn(object as any, 'roomData').mockImplementation(async () => {
       const player = Object.values(state.players).find((candidate) => candidate.id === 'joining-player');
       return { seed: 123, phantoms: [], playerSpawnIndex: player?.spawnIndex };

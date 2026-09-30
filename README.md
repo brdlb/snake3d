@@ -6,11 +6,11 @@ A browser-based 3D Snake game built with TypeScript, Three.js, and Vite. The cur
 
 - Move through a 3D arena, collect three kinds of food, grow, and change speed.
 - Complete the first-run tutorial; restart it from Settings.
-- Create or select a room, share its `?room=<seed>` link, and play alongside other players.
-- Coordinate rooms form a 3D grid. At length 100, the central five cells of each wall become a portal to the adjacent room. The new room appears when the head enters; earlier rooms remain visible until the body leaves them.
+- ENTER places every player in the first cube at `(0, 0, 0)`. Share a `?room=<seed>` link to enter a specific room and play alongside other players.
+- Coordinate rooms form a 3D grid. At length 100, the single central cell of each wall becomes a portal to the adjacent room. The new room appears when the head enters; earlier rooms remain visible until the body leaves them.
 - Enter an invited room as a player or a spectator. Spectators can use a free camera or follow a snake.
-- Encounter replay-based phantom snakes, compare room records, and view the leaderboard.
-- Play locally when the online service is unavailable. Offline results and previously cached phantoms are stored in the browser.
+- Compare room records and view the leaderboard. Saved replays are kept for scores but do not spawn phantom snakes.
+- Play locally when the online service is unavailable. Offline results are stored in the browser.
 - Customize the snake's appearance and audio and display settings.
 
 ## Requirements
@@ -66,11 +66,11 @@ After editing client code, run `npm run build` again so the Worker serves the up
 
 ## Online architecture
 
-`worker/index.ts` serves the built assets and the `/api/v1` HTTP API. An automatic cookie-based guest session identifies each player. D1 stores users, rooms, records, and saved replays. A Durable Object holds each room's live state and relays WebSocket events to players and spectators. The browser runs the game simulation and sends direction and state checkpoints; other clients animate players between those checkpoints. Saved replays become phantom snakes in later runs.
+`worker/index.ts` serves the built assets and the `/api/v1` HTTP API. An automatic cookie-based guest session identifies each player. D1 stores users, rooms, records, and saved replays. A Durable Object holds each room's live state and relays WebSocket events to players and spectators. The browser runs the game simulation and sends direction and state checkpoints; other clients animate players between those checkpoints.
 
 The server checks message structure and some movement rules, but it currently accepts client-reported positions, speed, and score. Treat room records and leaderboard results as casual-game results, not cheat-resistant rankings.
 
-Coordinate room IDs encode signed `(x, y, z)` positions and stay within JavaScript's safe integer range. `POST /api/v1/rooms` accepts `{ "x": 0, "y": 1, "z": -2 }` to create or retrieve a specific room, while an empty body creates the next room on the positive X axis. `NEXT` also advances one room along positive X. Portal travel uses `POST /api/v1/rooms/portal` and transfers the snake's full body, score, speed, and heading to the neighboring room. Older random-seed rooms remain accessible by their existing links but have no coordinate portals.
+Coordinate room IDs encode signed `(x, y, z)` positions and stay within JavaScript's safe integer range. `POST /api/v1/rooms` accepts `{ "x": 0, "y": 1, "z": -2 }` to create or retrieve a specific room, while an empty body creates the next room on the positive X axis. Portal travel uses `POST /api/v1/rooms/portal` and transfers the snake's full body, score, speed, and heading to the neighboring room. Older random-seed rooms remain accessible by their existing links but have no coordinate portals.
 
 ### Investigating a delayed game save
 
@@ -94,7 +94,7 @@ The migration and deploy commands change remote Cloudflare resources. `npm run p
 
 - `src/main.ts` and `src/core/Game.ts`: startup, tutorial, gameplay, rendering integration, and room events.
 - `src/network/NetworkManager.ts`: HTTP session and room API, WebSocket connection and events.
-- `src/entities/` and `src/graphics/`: snakes, food world, phantoms, and Three.js rendering.
+- `src/entities/` and `src/graphics/`: snakes, food world, and Three.js rendering.
 - `src/ui/`: room browser, HUD, leaderboard, settings, pause, and spectator UI.
 - `shared/`: appearance types, realtime protocol, and simulation rules shared with the Worker.
 - `worker/index.ts`: Cloudflare API and `RoomDurableObject`.

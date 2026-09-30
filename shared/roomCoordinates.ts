@@ -3,7 +3,8 @@ export const ROOM_SIZE = 50;
 export const ROOM_STRIDE = ROOM_SIZE + 1;
 export const PORTAL_MIN_LENGTH = 100;
 export const PORTAL_CENTER = ROOM_SIZE / 2;
-export const PORTAL_RADIUS = 2;
+export const PORTAL_APERTURE = 3;
+export const PORTAL_RADIUS = (PORTAL_APERTURE - 1) / 2;
 
 export type RoomCoordinates = { x: number; y: number; z: number };
 export type PortalDirection = 'xp' | 'xn' | 'yp' | 'yn' | 'zp' | 'zn';
@@ -17,6 +18,8 @@ export function roomSeed({ x, y, z }: RoomCoordinates): number {
     throw new RangeError('Room coordinates are outside the supported world');
   return COORD_OFFSET + ((x + COORD_LIMIT) * COORD_BASE + y + COORD_LIMIT) * COORD_BASE + z + COORD_LIMIT;
 }
+
+export const FIRST_ROOM_SEED = roomSeed({ x: 0, y: 0, z: 0 });
 
 export function roomCoordinates(seed: number): RoomCoordinates | null {
   if (!Number.isSafeInteger(seed) || seed < COORD_OFFSET || seed >= COORD_OFFSET + COORD_BASE ** 3)
@@ -50,7 +53,7 @@ export function generationSeed(seed: number): number {
 
 export type GridPosition = { x: number; y: number; z: number };
 
-/** The head must step through the central 5 by 5 opening of a face. */
+/** The head must step through one of the nine central cells of a face. */
 export function crossedPortal(head: GridPosition, length: number): PortalDirection | null {
   if (length < PORTAL_MIN_LENGTH) return null;
   const middle = (a: number, b: number) =>

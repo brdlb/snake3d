@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { WallMaterial } from './WallMaterial';
+import { PORTAL_APERTURE } from '../../shared/roomCoordinates';
 
 export class SceneManager {
     public renderer: THREE.WebGLRenderer;
@@ -74,23 +75,35 @@ export class SceneManager {
     public setupWalls(size: number) {
         if (this.wallMesh) this.scene.remove(this.wallMesh);
         const wallSize = size + 1;
-        const aperture = 5;
+        const aperture = PORTAL_APERTURE;
         const strip = (wallSize - aperture) / 2;
         const center = (wallSize + aperture) / 4;
         this.wallMesh = new THREE.Group();
         this.portalGates = [];
         const labelCanvas = document.createElement('canvas');
-        labelCanvas.width = 512;
-        labelCanvas.height = 128;
+        labelCanvas.width = 1536;
+        labelCanvas.height = 256;
         const context = labelCanvas.getContext('2d');
-        if (context) {
+        const labelTexture = new THREE.CanvasTexture(labelCanvas);
+        const drawLabel = () => {
+            if (!context) return;
+            context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
             context.fillStyle = '#ffffff';
-            context.font = 'bold 42px monospace';
-            context.textAlign = 'center';
+            const fontSize = Math.min(56, Math.max(32, window.innerWidth * 0.05));
+            const scale = 3;
+            context.font = `300 ${fontSize * scale}px Jura, sans-serif`;
             context.textBaseline = 'middle';
-            context.fillText('LENGTH 100', 256, 64);
-        }
-        this.portalLabelTexture = new THREE.CanvasTexture(labelCanvas);
+            const spacing = fontSize * scale * 0.2;
+            let x = 24;
+            for (const character of 'LENGTH 100') {
+                context.fillText(character, x, labelCanvas.height / 2);
+                x += context.measureText(character).width + spacing;
+            }
+            labelTexture.needsUpdate = true;
+        };
+        this.portalLabelTexture = labelTexture;
+        drawLabel();
+        void document.fonts?.ready.then(drawLabel);
         const faces: Array<[THREE.Vector3, THREE.Euler]> = [
             [new THREE.Vector3(0, 0, wallSize / 2), new THREE.Euler()],
             [new THREE.Vector3(0, 0, -wallSize / 2), new THREE.Euler(0, Math.PI, 0)],
@@ -118,11 +131,29 @@ export class SceneManager {
             );
             face.add(gate);
             this.portalGates.push(gate);
-            const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.portalLabelTexture, transparent: true, depthWrite: false }));
-            label.position.z = -0.04;
-            label.scale.set(4.5, 1.1, 1);
-            face.add(label);
-            this.portalGates.push(label);
+            const labelWidth = 3.5;
+            const labelHeight = 0.58;
+            const labelEdge = aperture / 2 + labelHeight / 2;
+            const labelGeometry = new THREE.PlaneGeometry(labelWidth, labelHeight);
+            const labelMaterial = new THREE.MeshBasicMaterial({ map: this.portalLabelTexture, transparent: true, depthWrite: false, toneMapped: false });
+            // Put one label along every edge of the opening, on both sides of the wall.
+            for (const side of [1, -1]) {
+                const labelSide = new THREE.Group();
+                labelSide.position.z = side * 0.04;
+                if (side < 0) labelSide.rotation.y = Math.PI;
+                for (const [x, y, angle] of [
+                    [0, labelEdge, 0],
+                    [0, -labelEdge, 0],
+                    [-labelEdge, 0, Math.PI / 2],
+                    [labelEdge, 0, -Math.PI / 2],
+                ]) {
+                    const label = new THREE.Mesh(labelGeometry, labelMaterial);
+                    label.position.set(x, y, 0);
+                    label.rotation.z = angle;
+                    labelSide.add(label);
+                }
+                face.add(labelSide);
+            }
             this.wallMesh.add(face);
         }
         this.wallMesh.position.set(size / 2, size / 2, size / 2);
@@ -176,7 +207,6 @@ export class SceneManager {
                     object.geometry.dispose();
                     if (object.material !== WallMaterial) object.material.dispose();
                 }
-                if (object instanceof THREE.Sprite) object.material.dispose();
             });
         }
         this.portalLabelTexture?.dispose();
