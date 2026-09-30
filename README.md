@@ -7,7 +7,7 @@ A browser-based 3D Snake game built with TypeScript, Three.js, and Vite. The cur
 - Move through a 3D arena, collect three kinds of food, grow, and change speed.
 - Complete the first-run tutorial; restart it from Settings.
 - ENTER places every player in the first cube at `(0, 0, 0)`. Share a `?room=<seed>` link to enter a specific room and play alongside other players.
-- Coordinate rooms form a 3D grid. At length 100, the single central cell of each wall becomes a portal to the adjacent room. The new room appears when the head enters; earlier rooms remain visible until the body leaves them.
+- Coordinate rooms form a 3D grid. At length 20, the single central cell of each wall becomes a portal to the adjacent room. The new room appears when the head enters; earlier rooms remain visible until the body leaves them.
 - Enter an invited room as a player or a spectator. Spectators can use a free camera or follow a snake.
 - Compare room records and view the leaderboard. Saved replays are kept for scores but do not spawn phantom snakes.
 - Play locally when the online service is unavailable. Offline results are stored in the browser.

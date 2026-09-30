@@ -1,7 +1,7 @@
 /** A room contains integer positions 0..50 on each axis. */
 export const ROOM_SIZE = 50;
 export const ROOM_STRIDE = ROOM_SIZE + 1;
-export const PORTAL_MIN_LENGTH = 100;
+export const PORTAL_MIN_LENGTH = 20;
 export const PORTAL_CENTER = ROOM_SIZE / 2;
 export const PORTAL_APERTURE = 1;
 export const PORTAL_FRAME_SIZE = 3;

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WallMaterial } from './WallMaterial';
 import { PORTAL_APERTURE, PORTAL_FRAME_SIZE } from '../../shared/roomCoordinates';
+import { FOOD_COLORS } from '../entities/World';
 
 export class SceneManager {
     public renderer: THREE.WebGLRenderer;
@@ -142,7 +143,7 @@ export class SceneManager {
             addStrip(strip, aperture, -center, 0);
             const gate = new THREE.Mesh(
                 new THREE.PlaneGeometry(aperture, aperture),
-                new THREE.MeshBasicMaterial({ color: 0x24c9ec, map: this.portalMaskTexture, transparent: true, side: THREE.DoubleSide, depthWrite: false }),
+                new THREE.MeshBasicMaterial({ color: FOOD_COLORS.BLUE, map: this.portalMaskTexture, transparent: true, side: THREE.DoubleSide, depthWrite: false }),
             );
             face.add(gate);
             this.portalGates.push(gate);
@@ -196,7 +197,7 @@ export class SceneManager {
             this.portalRemaining = remaining;
             this.updatePortalLabel?.(remaining);
         }
-        const color = open ? 0xffffff : 0x24c9ec;
+        const color = open ? 0xffffff : FOOD_COLORS.BLUE;
         for (const gate of this.portalGates) {
             gate.visible = true;
             (gate.material as THREE.MeshBasicMaterial).color.setHex(color);
