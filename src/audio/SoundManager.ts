@@ -39,6 +39,7 @@ export class SoundManager {
 
             // Create AudioListener NOW - during user gesture
             this.audioListener = this.sceneManager.initAudioListener();
+            this.setWindowActive(document.hasFocus() && !document.hidden);
             const context = this.audioListener.context;
 
             console.log(`[Audio] Initial context state: ${context.state}`);
@@ -179,6 +180,16 @@ export class SoundManager {
 
             this.humPool.push({ source: sound, mesh: mesh, foodIndex: -1, filter: filter });
         }
+    }
+
+    public setWindowActive(active: boolean): void {
+        if (!this.audioListener) return;
+
+        // Mute the shared output so every sound, including active hums, is covered.
+        const gain = this.audioListener.getInput().gain;
+        const now = this.audioListener.context.currentTime;
+        gain.cancelScheduledValues(now);
+        gain.setValueAtTime(active ? 1 : 0, now);
     }
 
     public setAmbientLowPass(enabled: boolean) {

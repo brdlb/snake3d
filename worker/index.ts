@@ -821,7 +821,10 @@ export class RoomDurableObject {
     }));
     // Recover stale persisted players whose socket disappeared without a close event.
     for (const [entityId, player] of Object.entries(this.simulation.players))
-      if (player.instanceId && player.disconnectedAt === undefined && !connected.has(player.instanceId))
+      if (player.disconnectedAt === undefined && (
+        (player.instanceId && !connected.has(player.instanceId)) ||
+        (!player.instanceId && player.nextStepAt + 15000 <= Date.now())
+      ))
         delete this.simulation.players[entityId];
     return this.simulation;
   }

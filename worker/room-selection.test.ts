@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import worker, { chooseSpawn, parseRoomSeed, replayReplacementOrder, ROOM_LIST_QUERY, RoomDurableObject } from './index';
-import { addPlayer, createSimulation } from '../shared/simulation';
+import { addPlayer, createSimulation, safeSpawn } from '../shared/simulation';
 import { FIRST_ROOM_SEED, roomSeed } from '../shared/roomCoordinates';
 
 describe('portal room transfer', () => {
@@ -134,7 +134,7 @@ describe('room state preparation', () => {
 
   it('removes replay phantoms from a saved room while keeping live players', async () => {
     const state = createSimulation(123);
-    addPlayer(state, 'player-1', 'PLAYER', 0);
+    addPlayer(state, 'player-1', 'PLAYER', Date.now());
     addPlayer(state, 'phantom:old-replay', 'PHANTOM', 0, { phantom: true });
     const storage = { get: vi.fn().mockResolvedValue(state) };
     const prepare = vi.fn();
@@ -453,6 +453,20 @@ describe('live player encounters', () => {
 });
 
 describe('terminal save diagnostics', () => {
+  it('frees all spawns occupied by legacy HTTP joins without socket metadata', async () => {
+    const state = createSimulation(123);
+    for (let spawnIndex = 0; spawnIndex < 4; spawnIndex++)
+      addPlayer(state, `legacy-${spawnIndex}`, 'LEGACY', Date.now() - 60000, { spawnIndex });
+    const object = new RoomDurableObject({
+      storage: { get: vi.fn().mockResolvedValue(state) }, getWebSockets: () => [],
+    } as any, {} as any);
+    const loaded = await (object as any).loadState(123);
+    expect(Object.keys(loaded.players)).toHaveLength(0);
+    expect(safeSpawn(loaded, undefined, 0).safe).toBe(true);
+    addPlayer(loaded, 'fresh', 'FRESH', Date.now());
+    expect(Object.keys((await (object as any).loadState(123)).players)).toHaveLength(1);
+  });
+
   it('removes orphaned persisted sockets but preserves connected players and pending joins', async () => {
     const state = createSimulation(123);
     addPlayer(state, 'orphan', 'ORPHAN', 0, { instanceId: 'lost' });
@@ -470,7 +484,7 @@ describe('terminal save diagnostics', () => {
   it('rejects a socket spawn when all spawn paths are occupied', async () => {
     const state = createSimulation(123);
     for (let spawnIndex = 0; spawnIndex < 4; spawnIndex++)
-      addPlayer(state, `peer-${spawnIndex}`, 'PEER', 0, { spawnIndex });
+      addPlayer(state, `peer-${spawnIndex}`, 'PEER', Date.now(), { spawnIndex });
     vi.stubGlobal('WebSocketPair', class { 0 = {}; 1 = {}; });
     try {
       const object = new RoomDurableObject({ getWebSockets: () => [] } as any, {

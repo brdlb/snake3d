@@ -124,6 +124,7 @@ export class Game {
 
   private _visibilityHandler: () => void;
   private _blurHandler: () => void;
+  private _focusHandler: () => void;
 
   // Async Multiplayer: Phantoms & Replay
   private phantoms: Phantom[] = [];
@@ -406,6 +407,7 @@ export class Game {
 
     // Visibility Handler to stop loop when tab is hidden
     this._visibilityHandler = () => {
+      this.soundManager?.setWindowActive(!document.hidden && document.hasFocus());
       if (document.hidden) {
         if (
           !this.tutorialMode &&
@@ -425,6 +427,7 @@ export class Game {
 
     // Blur Handler to pause when window loses focus
     this._blurHandler = () => {
+      this.soundManager?.setWindowActive(false);
       if (
         !this.tutorialMode &&
         !this.isSpectating &&
@@ -436,6 +439,10 @@ export class Game {
       }
     };
     window.addEventListener('blur', this._blurHandler);
+    this._focusHandler = () => {
+      this.soundManager?.setWindowActive(!document.hidden);
+    };
+    window.addEventListener('focus', this._focusHandler);
 
     // Input Bindings
     this.setupInputs();
@@ -1247,6 +1254,7 @@ export class Game {
     window.removeEventListener('resize', this.onWindowResize.bind(this));
     document.removeEventListener('visibilitychange', this._visibilityHandler);
     window.removeEventListener('blur', this._blurHandler);
+    window.removeEventListener('focus', this._focusHandler);
 
     // Dispose Managers
     this.sceneManager.dispose();
