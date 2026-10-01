@@ -814,6 +814,15 @@ export class RoomDurableObject {
       (await this.ctx.storage.get<SimulationState>('simulation')) ?? createSimulation(seed);
     for (const player of Object.values(this.simulation.players)) player.paused ??= false;
     this.removePhantoms(this.simulation);
+    this.cleanupDisconnected(this.simulation, Date.now());
+    const connected = new Set(this.ctx.getWebSockets().map((socket) => {
+      const attachment = socket.deserializeAttachment() as { instanceId?: string; spectator?: boolean } | null;
+      return attachment?.spectator ? undefined : attachment?.instanceId;
+    }));
+    // Recover stale persisted players whose socket disappeared without a close event.
+    for (const [entityId, player] of Object.entries(this.simulation.players))
+      if (player.instanceId && player.disconnectedAt === undefined && !connected.has(player.instanceId))
+        delete this.simulation.players[entityId];
     return this.simulation;
   }
   private async prepareState(seed: number) {
@@ -904,20 +913,28 @@ export class RoomDurableObject {
     if (!exists) return json({ error: { code: 'ROOM_NOT_FOUND' } }, 404);
     const state = await this.prepareState(seed);
     const spawn = chooseSpawn([]);
-    let availableSpawn = safeSpawn(state, undefined, spawn);
+    const spawnState = { ...state, players: Object.fromEntries(
+      Object.entries(state.players).filter(([, player]) => player.id !== user.id),
+    ) };
+    let availableSpawn = safeSpawn(spawnState, undefined, spawn);
     if (!availableSpawn.safe) {
       const weakest = chooseLowestPhantom(Object.values(state.players));
       if (!weakest) return json({ error: { code: 'ROOM_FULL' } }, 409);
       delete state.players[weakest.entityId];
-      availableSpawn = safeSpawn(state, undefined, weakest.spawnIndex ?? spawn);
+      delete spawnState.players[weakest.entityId];
+      availableSpawn = safeSpawn(spawnState, undefined, weakest.spawnIndex ?? spawn);
       if (!availableSpawn.safe) return json({ error: { code: 'ROOM_FULL' } }, 409);
     }
+    for (const [entityId, player] of Object.entries(state.players))
+      if (player.id === user.id && !player.phantom) delete state.players[entityId];
     const player = addPlayer(state, user.id, user.username, Date.now(), {
       spawnIndex: availableSpawn.spawnIndex,
       entityId: crypto.randomUUID(),
       appearance: normalizeSnakeAppearance(user.settings?.snakeAppearance),
     });
     const actualSpawn = player.spawnIndex ?? availableSpawn.spawnIndex;
+    // Expire a reservation if the HTTP join is never followed by a socket.
+    player.disconnectedAt = Date.now() + 15000;
     this.startTrajectory(state, player, actualSpawn);
     const time = now();
     await this.env.DB.batch([
@@ -948,7 +965,7 @@ export class RoomDurableObject {
         time,
       ),
     ]);
-    await this.ctx.storage.put('simulation', state);
+    await this.persist(state);
     this.broadcast({
       v: 2,
       type: 'player.joined',
@@ -1548,6 +1565,7 @@ export class RoomDurableObject {
     }
   }
   async webSocketClose(ws: WebSocket) {
+    this.simulation ??= await this.ctx.storage.get<SimulationState>('simulation') ?? null;
     const attachment = ws.deserializeAttachment() as {
         userId: string;
         entityId?: string;

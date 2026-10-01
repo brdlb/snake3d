@@ -207,7 +207,7 @@ describe('room state preparation', () => {
           : { query, args },
     }));
     const object = new RoomDurableObject(
-      { storage: { put: vi.fn() }, getWebSockets: () => [] } as any,
+      { storage: { put: vi.fn(), setAlarm: vi.fn() }, getWebSockets: () => [] } as any,
       { DB: { prepare, batch: vi.fn(async (batch) => statements.push(...batch)) } } as any,
     );
     vi.spyOn(object as any, 'prepareState').mockResolvedValue(state);
@@ -453,6 +453,20 @@ describe('live player encounters', () => {
 });
 
 describe('terminal save diagnostics', () => {
+  it('removes orphaned persisted sockets but preserves connected players and pending joins', async () => {
+    const state = createSimulation(123);
+    addPlayer(state, 'orphan', 'ORPHAN', 0, { instanceId: 'lost' });
+    addPlayer(state, 'online', 'ONLINE', 0, { instanceId: 'active' });
+    addPlayer(state, 'pending', 'PENDING', 0).disconnectedAt = Date.now() + 15000;
+    addPlayer(state, 'expired', 'EXPIRED', 0).disconnectedAt = Date.now() - 1;
+    const object = new RoomDurableObject({
+      storage: { get: vi.fn().mockResolvedValue(state) },
+      getWebSockets: () => [{ deserializeAttachment: () => ({ instanceId: 'active' }) }],
+    } as any, {} as any);
+    const loaded = await (object as any).loadState(123);
+    expect(Object.values(loaded.players).map((player: any) => player.id).sort()).toEqual(['online', 'pending']);
+  });
+
   it('rejects a socket spawn when all spawn paths are occupied', async () => {
     const state = createSimulation(123);
     for (let spawnIndex = 0; spawnIndex < 4; spawnIndex++)
@@ -481,6 +495,7 @@ describe('terminal save diagnostics', () => {
     });
     player.lastStateSeq = 12;
     player.lastInputSeq = 8;
+    player.disconnectedAt = Date.now() + 15000;
     const server = {
       serializeAttachment: vi.fn(), send: vi.fn(),
     };
