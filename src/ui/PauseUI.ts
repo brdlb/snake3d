@@ -235,7 +235,7 @@ export class PauseUI {
         leadersBtn.textContent = 'LEADERS';
         leadersBtn.onclick = () => this.onLeaderboard();
         content.appendChild(leadersBtn);
-        content.appendChild(statsPanel);
+        appearancePanel.insertBefore(statsPanel, controls);
         content.appendChild(appearancePanel);
 
         document.body.appendChild(this.container);

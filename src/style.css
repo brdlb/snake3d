@@ -1185,7 +1185,14 @@ button, input { font-family: inherit; }
 :root body .pause-screen .stats-panel, :root body .pause-screen .appearance-panel { width: min(100%, 650px); margin-top: 22px; padding: 16px 0; border-top: 1px solid #555; }
 :root body .pause-screen .stats-inner, :root body .game-over-screen .stats-inner { max-width: 240px; gap: 5px; }
 :root body .pause-screen .stat-row, :root body .game-over-screen .stat-row { font: 11px 'Consolas', monospace; letter-spacing: .08em; }
-:root body .pause-screen .appearance-panel { flex-wrap: wrap; gap: 15px; }
+:root body .pause-screen .appearance-panel { display: grid; grid-template-columns: auto minmax(125px, 1fr) 96px minmax(150px, 1fr); gap: 15px; }
+:root body .pause-screen .appearance-panel .stats-panel { width: 100%; min-width: 0; margin: 0; padding: 0; border: 0; }
+:root body .pause-screen .appearance-controls { grid-column: 1 / -1; }
+@media (max-width: 700px) {
+  :root body .pause-screen .appearance-panel { grid-template-columns: minmax(0, 1fr) 96px; }
+  :root body .pause-screen .appearance-title { grid-column: 1 / -1; }
+  :root body .pause-screen .appearance-panel .stats-panel { grid-column: 1 / -1; }
+}
 :root body .appearance-title { writing-mode: initial; transform: none; font: 10px 'Consolas', monospace; color: #aaa; }
 :root body .appearance-identity strong, :root body .appearance-identity span, :root body .appearance-seed, :root body .appearance-colors label { font-family: 'Consolas', monospace; }
 :root body .orientation-lock-panel { width: min(100%, 280px); min-width: 0; padding: 10px 0; font: 11px 'Consolas', monospace; }
