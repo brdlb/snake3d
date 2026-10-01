@@ -723,6 +723,7 @@ export class Game {
       await this.initialSpectatorPromise.catch(() => undefined);
       this.initialSpectatorPromise = null;
     }
+    this.isWaitingForStart = true;
     // Инициализируем AudioContext по клику пользователя
     if (mode === 'player') await this.soundManager.initAudio();
 
@@ -740,12 +741,14 @@ export class Game {
         this.selectedRoomSeed = room.seed;
         if (!this.isSpectating) replaceRoomInAddress(room.seed);
         this.initializeRoom(room);
-        // The socket can deliver its initial snapshot before room initialization
-        // finishes. Request one more snapshot after the local room is ready.
-        if (this.liveWorld) this.networkManager.requestResync();
+        // Apply even a snapshot received before initialization before movement starts.
+        const snapshot = await this.networkManager.waitForRoomState(room.seed);
+        this.applyLiveSnapshot(snapshot);
+        if (!this.isSpectating && !this.localSnakeInitialized)
+          throw new Error('PLAYER STATE UNAVAILABLE');
       } catch (error) {
-        console.warn('[Game] Failed to enter online room, falling back to local game:', error);
-        await this.initializeOfflineRoom();
+        console.warn('[Game] Failed to enter online room:', error);
+        throw error;
       }
     } else {
       // Оффлайн режим — загружаем кэшированные фантомы или генерируем локально
@@ -1889,6 +1892,7 @@ export class Game {
 
     if (this.liveWorld) {
       for (const opponent of this.liveOpponents) {
+        if (!opponent.alive) continue;
         for (const segment of opponent.segments) {
           if (head.distanceToSquared(segment) < 0.1) {
             console.log('Game Over: Remote player collision');

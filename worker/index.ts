@@ -1200,13 +1200,15 @@ export class RoomDurableObject {
         .first<{ spawn_index: number }>();
       const spawnIndex = assigned?.spawn_index ?? 0;
       if (!player || !player.alive) {
+        const availableSpawn = safeSpawn(state, undefined, spawnIndex);
+        if (!availableSpawn.safe) return json({ error: { code: 'ROOM_FULL' } }, 409);
         if (player) delete state.players[player.entityId];
         player = addPlayer(state, user.id, user.username, Date.now(), {
           spawnIndex,
           instanceId: connectionId,
           appearance: normalizeSnakeAppearance(user.settings?.snakeAppearance),
         });
-        this.startTrajectory(state, player, spawnIndex);
+        this.startTrajectory(state, player, player.spawnIndex ?? availableSpawn.spawnIndex);
         playerJoined = true;
       } else {
         player.instanceId = connectionId;

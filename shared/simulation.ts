@@ -117,6 +117,7 @@ export function safeSpawn(
   void _random;
   const blocked = new Set(
     Object.values(state.players)
+      .filter((p) => p.alive)
       .flatMap((p) => p.segments)
       .map(key),
   );
@@ -125,12 +126,13 @@ export function safeSpawn(
     : 0;
   for (let offset = 0; offset < spawnPoints.length; offset++) {
     const spawn = spawnPoints[(start + offset) % spawnPoints.length];
-    const tail = {
-      x: spawn.position.x - spawn.direction.x * 2,
-      y: spawn.position.y - spawn.direction.y * 2,
-      z: spawn.position.z - spawn.direction.z * 2,
-    };
-    if (inBounds(tail) && !blocked.has(key(spawn.position)) && !blocked.has(key(tail)))
+    // Check the entire initial body and the first forward step.
+    const cells = [-2, -1, 0, 1].map((step) => ({
+      x: spawn.position.x + spawn.direction.x * step,
+      y: spawn.position.y + spawn.direction.y * step,
+      z: spawn.position.z + spawn.direction.z * step,
+    }));
+    if (cells.every((cell) => inBounds(cell) && !blocked.has(key(cell))))
       return {
         position: { ...spawn.position },
         direction: { ...spawn.direction },

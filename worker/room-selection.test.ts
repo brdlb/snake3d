@@ -453,6 +453,27 @@ describe('live player encounters', () => {
 });
 
 describe('terminal save diagnostics', () => {
+  it('rejects a socket spawn when all spawn paths are occupied', async () => {
+    const state = createSimulation(123);
+    for (let spawnIndex = 0; spawnIndex < 4; spawnIndex++)
+      addPlayer(state, `peer-${spawnIndex}`, 'PEER', 0, { spawnIndex });
+    vi.stubGlobal('WebSocketPair', class { 0 = {}; 1 = {}; });
+    try {
+      const object = new RoomDurableObject({ getWebSockets: () => [] } as any, {
+        DB: { prepare: () => ({ bind: () => ({ first: async () => ({ spawn_index: 0 }) }) }) },
+      } as any);
+      (object as any).simulation = state;
+      const response = await (object as any).socket(new Request('https://room/socket', {
+        headers: { upgrade: 'websocket', 'x-user': JSON.stringify({ id: 'visitor', username: 'VISITOR' }), 'x-seed': '123' },
+      }));
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: { code: 'ROOM_FULL' } });
+      expect(Object.values(state.players)).toHaveLength(4);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('accepts a fresh state sequence after reconnecting a living player', async () => {
     const state = createSimulation(123);
     const player = addPlayer(state, 'player-1', 'Player', 0, {

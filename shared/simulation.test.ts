@@ -2,6 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { addPlayer, advanceSimulation, chooseLowestPhantom, createSimulation, safeSpawn, stepSimulation, validInput, validOrientation } from './simulation';
 
 describe('live room simulation', () => {
+  it.each([-1, 1])('rejects a spawn blocked at offset %i', (step) => {
+    const state = createSimulation(42);
+    const initial = safeSpawn(state, undefined, 0);
+    addPlayer(state, 'blocker', 'Blocker', 0, { segments: [{
+      x: initial.position.x + initial.direction.x * step,
+      y: initial.position.y + initial.direction.y * step,
+      z: initial.position.z + initial.direction.z * step,
+    }] });
+    expect(safeSpawn(state, undefined, 0)).toMatchObject({ spawnIndex: 1, safe: true });
+  });
+
+  it('does not let a dead player block a spawn', () => {
+    const state = createSimulation(42);
+    addPlayer(state, 'dead', 'Dead', 0, { spawnIndex: 0 }).alive = false;
+    expect(safeSpawn(state, undefined, 0)).toMatchObject({ spawnIndex: 0, safe: true });
+  });
+
   it('chooses an unoccupied dynamic spawn', () => {
     const state = createSimulation(42);
     addPlayer(state, 'a', 'A', 0, { spawnIndex: 0 });
