@@ -1,3 +1,4 @@
+import { simulateClientMove, excessiveAdventureDelta } from '../shared/adventureValidation';
 import { ROOM_LIST_QUERY } from './roomQueries';
 import {
   addPlayer,
@@ -21,7 +22,7 @@ import type {
   RealtimeClientMessage,
   StateInput,
 } from '../shared/realtime';
-import { ADVENTURE_VERSION, advanceCoatings, applyInteractions, checkPortal, checkpointBlocked, copy, enterAdventure, moveAdventure, newAdventure, samePosition, transitionAdventure, validAdventureRoom, type AdventureSnake, type EntryCheckpoint, type RoomDefinition } from '../shared/adventure';
+import { ADVENTURE_VERSION, advanceCoatings, applyInteractions, checkPortal, checkpointBlocked, copy, enterAdventure, newAdventure, samePosition, transitionAdventure, validAdventureRoom, type AdventureSnake, type EntryCheckpoint, type RoomDefinition } from '../shared/adventure';
 import { adventureEnabled, adventureStatement, loadAdventure } from './adventureStore';
 import { generateSharedRoom, validateRoomDefinition } from '../shared/adventureGeneration';
 export interface Env {
@@ -667,6 +668,9 @@ export class RoomDurableObject {
     private readonly ctx: DurableObjectState,
     private readonly env: Env,
   ) {}
+  private adventureCheckpointTimer: ReturnType<typeof setTimeout> | null = null;
+  private adventureDepartures = new Set<string>();
+  private adventureBudgets = new Map<string, { at: number; steps: number }>();
   private simulation: SimulationState | null = null;
   private restartUserId: string | null = null;
   private lastSpectatorSyncRequestAt = 0;
@@ -708,6 +712,16 @@ export class RoomDurableObject {
       players: Object.values(state.players),
     };
   }
+  private scheduleAdventureCheckpoint() {
+    if (this.adventureCheckpointTimer !== null) return;
+    // A pending timer keeps the dirty actor in memory until its recovery snapshot is durable.
+    this.adventureCheckpointTimer = setTimeout(() => {
+      this.adventureCheckpointTimer = null;
+      const checkpoint = this.messageQueue.then(() => this.simulation ? this.persist(this.simulation) : undefined);
+      this.messageQueue = checkpoint.catch(error => console.error('Adventure checkpoint failed', error));
+    }, 5000);
+  }
+
   private async persist(state: SimulationState) {
     await this.ctx.storage.put('simulation', state);
     const deadlines = Object.values(state.players)
@@ -757,6 +771,7 @@ export class RoomDurableObject {
     return player;
   }
   private async adventureRequest(path: string, request: Request): Promise<Response> {
+    await this.messageQueue;
     if (!adventureEnabled(this.env)) return json({ error: { code: 'ADVENTURE_DISABLED' } }, 404);
     const input = await request.json<any>();
     if (path === '/adventure-assign') return this.assignAdventureRoom(input.action, input.contextSeed, input.user);
@@ -782,6 +797,7 @@ export class RoomDurableObject {
       const seed = roomSeed(adjacentRoom(roomCoordinates(simulation.seed)!, direction));
       const checkpoint = enterAdventure(transition.snake, seed, transition.path);
       await this.ctx.storage.put(`departure:${userId}`, { transferId, checkpoint, createdAt: Date.now() });
+      this.adventureDepartures.add(userId);
       return json({ checkpoint });
     }
     if (path === '/adventure-reserve') {
@@ -824,6 +840,7 @@ export class RoomDurableObject {
       if (departure?.transferId === input.transferId) {
         if (input.committed && this.simulation) for (const [id, p] of Object.entries(this.simulation.players)) if (p.id === input.userId && !p.phantom) delete this.simulation.players[id];
         await this.ctx.storage.delete(`departure:${input.userId}`);
+        this.adventureDepartures.delete(input.userId);
         if (this.simulation) { await this.persist(this.simulation); this.broadcast({ v: 2, type: 'room.state', payload: this.snapshot(this.simulation) }); }
       }
       return json({ released: true });
@@ -1566,38 +1583,79 @@ export class RoomDurableObject {
           : { v: 2, type: 'error', payload: { code: 'STALE_CONNECTION' } }));
         return;
       }
-      if (player.adventure && await this.ctx.storage.get(`departure:${player.id}`)) return;
+      if (player.adventure && (this.adventureDepartures.has(player.id) || (event.type !== 'adventure.step' && await this.ctx.storage.get(`departure:${player.id}`)))) return;
       if (event.type === 'adventure.step') {
         if (!player.adventure || event.v !== 3 || player.paused || !player.alive || !snakeState(action)) return;
-        const step = (action as { step?: number }).step;
-        if (step !== (player.adventureStep ?? 0) + 1) {
-          ws.send(JSON.stringify({ v: 3, type: 'adventure.state', payload: { entityId: player.entityId, step: player.adventureStep ?? 0, state: this.adventureSnake(player) } }));
-          return;
+        const input = action as import('../shared/realtime').AdventureInput;
+        const step = input.step, epoch = player.adventureEpoch ?? 0;
+        const previousStep = player.adventureStep ?? 0;
+        const correction = () => {
+          const message = { v: 3, type: 'adventure.state', payload: {
+            entityId: player.entityId, step: player.adventureStep ?? 0,
+            epoch: player.adventureEpoch ?? 0, correction: true, state: this.adventureSnake(player),
+          } };
+          ws.send(JSON.stringify(message));
+          this.broadcast(message, ws);
+          this.scheduleAdventureCheckpoint();
+        };
+        if ((input.epoch ?? 0) !== epoch) { correction(); return; }
+        if (sequence(step) && step <= previousStep) return;
+        const budget = this.adventureBudgets.get(player.entityId) ?? { at: Date.now(), steps: Math.max(4, player.speed / 30) };
+        budget.steps = Math.min(64, budget.steps + Math.max(0, Date.now() - budget.at) * player.speed / 60000);
+        budget.at = Date.now();
+        this.adventureBudgets.set(player.entityId, budget);
+        const moves = input.moves ?? [{ direction: input.direction, up: input.up }];
+        if (!sequence(step) || !Array.isArray(moves) || step - previousStep !== moves.length || moves.length > budget.steps || moves.length > 64 || !moves.length ||
+            !moves.every(move => move && validOrientation(move.direction, move.up))) {
+          player.adventureEpoch = epoch + 1; correction(); return;
         }
+        budget.steps -= moves.length;
         const previous = this.adventureSnake(player);
-        const next = moveAdventure(previous, action.direction);
-        if (!next || !samePosition(next.segments[0], action.segments[0])) {
-          ws.send(JSON.stringify({ v: 3, type: 'adventure.state', payload: { entityId: player.entityId, step: player.adventureStep ?? 0, state: previous } }));
-          return;
+        let next = previous;
+        let foodChanged = false;
+        const foodBefore = copy(state.food);
+        for (let i = 0; i < moves.length; i++) {
+          const moved = simulateClientMove(next, moves[i].direction);
+          if (!moved) { state.food = foodBefore; player.adventureEpoch = epoch + 1; correction(); return; }
+          moved.up = copy(moves[i].up);
+          const eaten = state.food.findIndex(food => samePosition(food, moved.segments[0]));
+          if (eaten >= 0) {
+            foodChanged = true;
+            const removed = state.food.splice(eaten, 1)[0], effect = foodEffect(removed.kind);
+            moved.score += effect.score; moved.speed = Math.max(60, moved.speed + effect.speed); moved.growth += effect.growth;
+            const available = createSimulation(state.seed + state.tick + i).food.find(food => !state.food.some(p => samePosition(p, food)) && !Object.values(state.players).some(p => p.segments.some(s => samePosition(s, food))) && !this.definition(state).interactions.some(o => samePosition(o.position, food)));
+            if (available) state.food.push(available);
+          }
+          const triggered = applyInteractions(this.definition(state), moved, 60000 / next.speed);
+          const trajectory = state.trajectories?.[player.id];
+          if (trajectory) {
+            if (!samePosition(next.direction, moved.direction)) trajectory.changes.push({ position: copy(next.segments[0]), direction: copy(moved.direction) });
+            if (triggered.length || eaten >= 0 || JSON.stringify(next.adventure) !== JSON.stringify(moved.adventure))
+              (trajectory.events ??= []).push({ step: previousStep + i + 1, snake: copy(moved) });
+          }
+          next = moved;
         }
-        next.up = copy(action.up);
-        const eaten = state.food.findIndex(food => samePosition(food, next.segments[0]));
-        if (eaten >= 0) {
-          const removed = state.food.splice(eaten, 1)[0];
-          const effect = foodEffect(removed.kind);
-          next.score += effect.score; next.speed = Math.max(60, next.speed + effect.speed); next.growth += effect.growth;
-          const available = createSimulation(state.seed + state.tick).food.find(food => !state.food.some(p => samePosition(p, food)) && !Object.values(state.players).some(p => p.segments.some(s => samePosition(s, food))) && !this.definition(state).interactions.some(o => samePosition(o.position, food)));
-          if (available) state.food.push(available);
-        }
-        const triggered = applyInteractions(this.definition(state), next, 60000 / previous.speed);
-        if (!samePosition(player.direction, next.direction)) { player.direction = next.direction; this.recordDirection(state, player, previous.segments[0]); }
-        Object.assign(player, next, { adventureStep: step });
-        state.tick++;
+        const client = input as AdventureSnake;
+        const force = !client.adventure || !Number.isSafeInteger(client.growth) || excessiveAdventureDelta(next, client);
+        const accepted = force ? next : client;
+        Object.assign(player, { segments: copy(accepted.segments), direction: copy(accepted.direction), up: copy(accepted.up),
+          score: accepted.score, speed: accepted.speed, growth: accepted.growth, adventure: copy(accepted.adventure), adventureStep: step });
+        // Never store protocol metadata on the simulation player.
+        delete (player as unknown as Record<string, unknown>).moves;
+        delete (player as unknown as Record<string, unknown>).epoch;
+        delete (player as unknown as Record<string, unknown>).step;
+        state.tick += moves.length;
         const trajectory = state.trajectories?.[player.id];
-        if (trajectory && (triggered.length || eaten >= 0 || JSON.stringify(next.adventure.coatings) !== JSON.stringify(previous.adventure.coatings) || JSON.stringify(next.adventure.completed) !== JSON.stringify(previous.adventure.completed))) (trajectory.events ??= []).push({ step: step!, snake: copy(next) });
-        await this.persist(state);
-        this.broadcast({ v: 3, type: 'adventure.state', payload: { entityId: player.entityId, step: step!, state: next } });
-        if (eaten >= 0) this.broadcast({ v: 2, type: 'room.state', payload: this.snapshot(state) });
+        if (trajectory) (trajectory.events ??= []).push({ step, snake: copy(this.adventureSnake(player)) });
+        if (force) { player.adventureEpoch = epoch + 1; correction(); }
+        else {
+          const message = { v: 3, type: 'adventure.state', payload: { entityId: player.entityId, step, epoch, state: this.adventureSnake(player) } };
+          ws.send(JSON.stringify(message));
+          this.broadcast(message, ws);
+        }
+        if (foodChanged) this.broadcast({ v: 2, type: 'room.state', payload: this.snapshot(state) });
+        // Durable recovery checkpoint, not a write per simulation step.
+        this.scheduleAdventureCheckpoint();
         return;
       }
       if (player.adventure && (event.type === 'player.state' || event.type === 'player.directionChanged')) return;
@@ -1732,9 +1790,18 @@ export class RoomDurableObject {
         try {
         await this.saveStage(state.seed, player.id, action.submissionId, 'received');
         ws.send(JSON.stringify({ v: 2, type: 'game.saveStarted', payload: { submissionId: action.submissionId, stage: 'received' } }));
-        player.segments = action.segments;
-        player.direction = action.direction;
-        player.up = action.up;
+        const terminalCorrection = player.adventure && (!Number.isSafeInteger(action.growth) ||
+          excessiveAdventureDelta(this.adventureSnake(player), action as AdventureSnake, true));
+        if (!terminalCorrection) {
+          player.segments = action.segments;
+          player.direction = action.direction;
+          player.up = action.up;
+        } else {
+          player.adventureEpoch = (player.adventureEpoch ?? 0) + 1;
+          const message = { v: 3, type: 'adventure.state', payload: { entityId: player.entityId,
+            step: player.adventureStep ?? 0, epoch: player.adventureEpoch, correction: true, state: this.adventureSnake(player) } };
+          ws.send(JSON.stringify(message)); this.broadcast(message, ws);
+        }
         if (!player.adventure) { player.score = action.score; player.speed = action.speed; }
         player.lastStateSeq = action.seq;
         player.alive = false;

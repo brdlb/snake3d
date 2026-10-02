@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import worker, { RoomDurableObject } from './index';
 import { addPlayer, createSimulation } from '../shared/simulation';
-import { copy, enterAdventure, newAdventure, type AdventureSnake } from '../shared/adventure';
+import { applyInteractions, copy, enterAdventure, newAdventure, type AdventureSnake } from '../shared/adventure';
+import { simulateClientMove } from '../shared/adventureValidation';
 import { roomSeed } from '../shared/roomCoordinates';
 
 function fixture() {
@@ -44,7 +45,7 @@ function fixture() {
     const state = createSimulation(seed); state.food = [];
     (actor as any).simulation = state;
     (actor as any).liveState = vi.fn(async () => state);
-    return { actor, state, stored };
+    return { actor, state, stored, storage };
   };
   const source = makeActor(from), target = makeActor(to);
   env.ROOMS = { idFromName: (name: string) => name, get: (name: string) => ({ fetch: (url: string, init: RequestInit) => (name === String(from) ? source.actor : target.actor).fetch(new Request(url, init)) }) };
@@ -99,7 +100,82 @@ describe('adventure transfer transaction', () => {
   });
 });
 
+afterEach(() => vi.useRealTimers());
+
 describe('adventure step authority', () => {
+  function movingFixture() {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.player.segments = [{ x: 5, y: 5, z: 5 }, { x: 5, y: 5, z: 4 }, { x: 5, y: 5, z: 3 }];
+    f.player.direction = { x: 0, y: 0, z: 1 }; f.player.up = { x: 0, y: 1, z: 0 };
+    f.player.adventure = newAdventure(3, 300);
+    (f.source.actor as any).startTrajectory(f.source.state, f.player, 0);
+    (f.source.actor as any).definition = () => ({ interactions: [] });
+    const ws: any = { deserializeAttachment: () => ({ userId: f.user.id, entityId: f.player.entityId, instanceId: 'connection', seed: f.from, user: f.user }), send: vi.fn() };
+    const send = (action: any) => f.source.actor.webSocketMessage(ws, JSON.stringify({ v: 3, type: 'adventure.step', payload: { action } }));
+    const batch = (count: number) => {
+      let next = (f.source.actor as any).adventureSnake(f.player);
+      const moves = [];
+      for (let i = 0; i < count; i++) {
+        const speed = next.speed;
+        next = simulateClientMove(next, next.direction)!;
+        applyInteractions({ interactions: [] } as any, next, 60000 / speed);
+        moves.push({ direction: next.direction, up: next.up });
+      }
+      return { ...next, step: (f.player.adventureStep ?? 0) + count, epoch: f.player.adventureEpoch ?? 0, moves };
+    };
+    return { ...f, ws, send, batch };
+  }
+  it('simulates a batch in memory and writes one recovery checkpoint after five seconds', async () => {
+    const f = movingFixture();
+    await f.send(f.batch(3));
+    expect(f.player.segments[0].z).toBe(8);
+    expect(f.source.storage.get).not.toHaveBeenCalled();
+    expect(f.source.storage.put).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.source.storage.put).toHaveBeenCalledTimes(1);
+    expect(f.source.stored.get('simulation').players[f.player.entityId].adventureStep).toBe(3);
+  });
+  it('accepts a small client delta but forces a large jump and rejects the previous epoch', async () => {
+    const f = movingFixture();
+    const small = f.batch(1); small.segments.forEach((p: any) => p.x++);
+    await f.send(small);
+    expect(f.player.segments[0].x).toBe(6);
+    expect(f.player.adventureEpoch).toBeUndefined();
+    const forged = f.batch(1); forged.segments[0].x += 10;
+    await f.send(forged);
+    expect(f.player.segments[0].x).toBe(6);
+    expect(f.player.adventureEpoch).toBe(1);
+    expect(JSON.parse(f.ws.send.mock.calls.at(-1)[0]).payload.correction).toBe(true);
+    const before = copy(f.player);
+    await f.send({ ...f.batch(1), epoch: 0 });
+    expect(f.player).toEqual(before);
+  });
+  it('accepts the client checkpoint when server movement reports a body collision', async () => {
+    const f = movingFixture();
+    f.player.segments = [{ x: 5, y: 5, z: 5 }, { x: 5, y: 5, z: 6 }, { x: 5, y: 5, z: 7 }];
+    const action = f.batch(1);
+    action.segments = [{ x: 6, y: 5, z: 5 }, { x: 5, y: 5, z: 5 }, { x: 5, y: 5, z: 6 }];
+    action.direction = { x: 1, y: 0, z: 0 };
+    await f.send(action);
+    expect(f.player.segments).toEqual(action.segments);
+    expect(f.player.alive).toBe(true);
+    expect(f.player.adventureEpoch).toBeUndefined();
+  });
+  it('does not allow a client checkpoint to overwrite player identity or life state', async () => {
+    const f = movingFixture();
+    await f.send({ ...f.batch(1), id: 'forged', entityId: 'forged', alive: false });
+    expect(f.player.id).toBe(f.user.id);
+    expect(f.player.alive).toBe(true);
+  });
+  it('corrects malformed adventure state and excessive movement rate', async () => {
+    const f = movingFixture();
+    await f.send({ ...f.batch(1), adventure: {} });
+    expect(f.player.adventureEpoch).toBe(1);
+    await f.send(f.batch(12));
+    expect(f.player.adventureEpoch).toBe(2);
+    expect(f.player.adventureStep).toBe(1);
+  });
   it('ignores forged charge and speed, advances one legal cell, and ignores duplicate steps', async () => {
     const f = fixture();
     f.player.segments = [{ x: 5, y: 5, z: 5 }, { x: 5, y: 5, z: 4 }, { x: 5, y: 5, z: 3 }];

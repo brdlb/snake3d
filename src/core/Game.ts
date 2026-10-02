@@ -84,8 +84,11 @@ import { validateRoomDefinition } from '../../shared/adventureGeneration';
 export class Game {
   private roomDefinition?: RoomDefinition;
   private adventure?: AdventureState;
-  private adventurePending = false;
-  private adventurePendingSince = 0;
+  private adventureEpoch = 0;
+  private adventureMoves: Array<{ direction: { x: number; y: number; z: number }; up: { x: number; y: number; z: number } }> = [];
+  private adventureSentAt = 0;
+  private adventureQueuedStep = 0;
+  private adventureQueuedState: SnakeState | null = null;
   private settingsManager: SettingsManager;
   private sceneManager: SceneManager;
   private cameraController: CameraController;
@@ -387,13 +390,17 @@ export class Game {
     this.networkManager.on('room.state', (snapshot: RoomSnapshot) => {
       if (!this.isRoomTransitionPending) this.applyLiveSnapshot(snapshot);
     });
-    this.networkManager.on('adventure.state', (change: { entityId: string; step: number; state: SnakeState }) => {
-      if (change.entityId === this.localEntityId && !this.isRoomTransitionPending && !this.isGameOver) {
+    this.networkManager.on('adventure.state', (change: { entityId: string; step: number; state: SnakeState; correction?: boolean; epoch?: number }) => {
+      if (change.entityId === this.localEntityId) {
+        if (!change.correction) return;
+        if ((change.epoch ?? 0) < this.adventureEpoch) return;
+        this.adventureEpoch = change.epoch ?? 0;
         this.applyAdventureState(change.state);
         this.playerTick = change.step;
-        this.adventurePending = false;
+        this.adventureMoves = [];
         if (change.state.adventure) this.replayRecorder?.recordAdventure(change.step, change.state as AdventureSnake);
       } else {
+        if (change.correction) this.liveStateTicks.delete(change.entityId);
         this.applyLiveState({ ...change.state, entityId: change.entityId, step: change.step, seq: change.step, reason: 'speed', serverTime: Date.now() });
       }
     });
@@ -646,7 +653,9 @@ export class Game {
   private initializeRoom(data: RoomData): void {
     this.roomDefinition = data.definition;
     this.adventure = data.initialState?.adventure ? copy(data.initialState.adventure) : undefined;
-    this.adventurePending = false;
+    this.adventureMoves = [];
+    this.adventureQueuedState = null;
+    this.adventureEpoch = 0;
     this.liveWorld = this.networkManager.isConnected();
     this.liveOpponents = [];
     this.livePhantomReplays = new Map(
@@ -1003,10 +1012,11 @@ export class Game {
       this.roomDefinition = snapshot.definition;
       this.sceneManager.setAdventureObjects(this.roomDefinition);
     }
-    if (localPlayer?.adventure && !this.isGameOver) {
+    if (localPlayer?.adventure && !this.isGameOver && (!this.localSnakeInitialized || (localPlayer.adventureEpoch ?? 0) > this.adventureEpoch)) {
+      this.adventureEpoch = localPlayer.adventureEpoch ?? 0;
       this.applyAdventureState(localPlayer);
       this.playerTick = localPlayer.adventureStep ?? 0;
-      this.adventurePending = false;
+      this.adventureMoves = [];
     }
     if (!this.localSnakeInitialized && localPlayer?.segments?.length && localPlayer.direction) {
       const direction = new THREE.Vector3(
@@ -1187,7 +1197,15 @@ export class Game {
     });
   }
 
+  private flushAdventureMoves() {
+    if (!this.adventure || !this.adventureMoves.length) return;
+    this.networkManager.sendAdventureStep({ ...this.adventureQueuedState!, step: this.adventureQueuedStep, epoch: this.adventureEpoch, moves: this.adventureMoves }, this.localEntityId);
+    this.adventureMoves = [];
+    this.adventureSentAt = Date.now();
+  }
+
   private sendLivePause() {
+    this.flushAdventureMoves();
     this.networkManager.sendPause({
       type: 'pause',
       seq: ++this.localStateSeq,
@@ -1531,12 +1549,7 @@ export class Game {
       this.cameraController.update(delta, head, this.snake.direction, 0);
       return;
     }
-    if (this.adventurePending) {
-      if (Date.now() - this.adventurePendingSince > 3000) { this.networkManager.requestResync(); this.adventurePendingSince = Date.now(); }
-      this.advanceLiveOpponents(delta);
-      this.cameraController.update(delta, this.snake.getHead(), this.snake.direction, 0);
-      return;
-    }
+
 
     // Stats Update
     this.gameStats.time += delta;
@@ -1607,11 +1620,17 @@ export class Game {
       if (this.roomDefinition && this.adventure && !this.isGameOver) {
         this.adventure.coatings = advanceCoatings(this.adventure.coatings, this.snake.segments.length);
         const next = this.livePlayerState() as AdventureSnake;
-        applyInteractions(this.roomDefinition, next, 60000 / this.currentSPM);
+        const triggered = applyInteractions(this.roomDefinition, next, 60000 / this.currentSPM);
         this.applyAdventureState(next);
-        this.adventurePending = true;
-        this.adventurePendingSince = Date.now();
-        this.networkManager.sendAdventureStep({ ...next, step: this.playerTick });
+        const previousState = this.adventureQueuedState;
+        const changed = previousState && (JSON.stringify(previousState.direction) !== JSON.stringify(next.direction) ||
+          JSON.stringify(previousState.up) !== JSON.stringify(next.up) || previousState.score !== next.score || previousState.speed !== next.speed);
+        this.adventureQueuedStep = this.playerTick;
+        this.adventureQueuedState = copy(next);
+        this.adventureMoves.push({ direction: next.direction, up: next.up });
+        const reachedBoundary = Object.values(next.segments[0]).some(value => value === 0 || value === WORLD_SIZE);
+        if (triggered.length || reachedBoundary || atBoundary || changed || Date.now() - this.adventureSentAt >= 500)
+          this.flushAdventureMoves();
       }
 
       // Update Pathfinder on Step
@@ -1895,13 +1914,16 @@ export class Game {
   private async enterPortal(direction: PortalDirection, preStepSegments: THREE.Vector3[] | null): Promise<void> {
     if (this.isRoomTransitionPending) return;
     this.isRoomTransitionPending = true;
+    this.flushAdventureMoves();
     const state = this.livePlayerState();
     const delta = portalOffset(direction);
     const offset = new THREE.Vector3(delta.x, delta.y, delta.z);
     const previousFood = this.world.foodPositions.map((position) => position.clone());
     const previousColors = this.world.foodColors.map((color) => color.clone());
     const fromSeed = this.currentSeed;
+    const epoch = this.adventureEpoch;
     try {
+      if (this.adventure) await this.networkManager.waitAdventureCheckpoint();
       const transferId = crypto.randomUUID();
       let room: RoomData | undefined;
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -1958,7 +1980,7 @@ export class Game {
         this.applyLiveSnapshot(snapshot)).catch((error) => console.warn('[Game] Portal room state unavailable:', error));
     } catch (error) {
       console.warn('[Game] Portal transfer failed:', error);
-      if (preStepSegments) {
+      if (preStepSegments && epoch === this.adventureEpoch) {
         this.snake.applyAuthoritativeState(preStepSegments, this.snake.direction, state.speed);
         this.playerTick = Math.max(0, this.playerTick - 1);
         this.gameStats.distance = Math.max(0, this.gameStats.distance - 1);
@@ -2303,6 +2325,7 @@ export class Game {
     if (reason && this.liveWorld) {
       // The restart assignment reads replays from D1, so wait until the
       // WebSocket death handler has committed this run.
+      this.flushAdventureMoves();
       this.pendingDeathAction = {
         type: 'death',
         submissionId: crypto.randomUUID(),

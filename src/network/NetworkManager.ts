@@ -1,5 +1,5 @@
 import type { RoomData, RoomSummary } from '../types/replay';
-import { isRealtimeServerMessage, type DeathInput, type DirectionInput, type PauseInput, type RealtimeClientMessage, type RoomSnapshot, type StateInput } from '../../shared/realtime';
+import { isRealtimeServerMessage, type AdventureInput, type DeathInput, type DirectionInput, type PauseInput, type RealtimeClientMessage, type RoomSnapshot, type StateInput } from '../../shared/realtime';
 import type { SnakeAppearance } from '../../shared/appearance';
 import type { PortalDirection, RoomCoordinates } from '../../shared/roomCoordinates';
 import type { SnakeState } from '../../shared/realtime';
@@ -22,6 +22,7 @@ export class NetworkManager {
   private roomSeed: number | null = null;
   private roomIsSpectator = false;
   private roomIsRestarting = false;
+  private adventureCheckpoint: Promise<void> = Promise.resolve();
   private latestRoomSnapshot: RoomSnapshot | null = null;
   private readonly apiBase = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8787');
   private constructor() { if (typeof window !== 'undefined') { window.addEventListener('online', () => { this.emit('networkOnline'); this.reconnectRoom(); }); window.addEventListener('offline', () => { this.state='offline'; this.emit('networkOffline'); this.emit('connectionStateChange',this.state); }); } }
@@ -93,7 +94,22 @@ export class NetworkManager {
   private openRoomSocket(seed:number, spectating=false, restarting=false) { const previous=this.socket; this.latestRoomSnapshot=null; if(this.heartbeat!==null)window.clearInterval(this.heartbeat); this.heartbeat=null; const url=new URL(`${this.apiBase}/api/v1/rooms/${seed}/socket`);if(spectating)url.searchParams.set('spectator','1');if(restarting)url.searchParams.set('restart','1');url.protocol=url.protocol==='https:'?'wss:':'ws:'; const socket=this.socket=new WebSocket(url); previous?.close(); socket.onopen=()=>{if(this.socket!==socket)return;this.retries=0;this.roomIsRestarting=false;this.sendRealtime({v:2,type:'room.resync'});this.heartbeat=window.setInterval(()=>this.sendRealtime({v:2,type:'ping'}),15000);this.emit('roomSocketConnected');}; socket.onmessage=(event)=>{if(this.socket!==socket)return;try{const message:unknown=JSON.parse(event.data);if(isRealtimeServerMessage(message)){console.log(`[Network] Server event: ${message.type}`, 'payload' in message ? message.payload : message);if(message.type==='room.state')this.latestRoomSnapshot=message.payload;this.emit(message.type,'payload' in message?message.payload:message);}}catch(error){console.warn('[Network] Invalid server message:',event.data,error);}}; socket.onclose=()=>{if(this.socket!==socket)return;if(this.heartbeat!==null)window.clearInterval(this.heartbeat);this.heartbeat=null;this.scheduleReconnect();}; socket.onerror=()=>socket.close(); }
   private sendRealtime(message: RealtimeClientMessage) { if(this.socket?.readyState===WebSocket.OPEN)this.socket.send(JSON.stringify(message)); }
   sendDirection(action: DirectionInput) { this.sendRealtime({v:2,type:'player.directionChanged',payload:{action}}); }
-  sendAdventureStep(action: SnakeState & { step: number }) { this.sendRealtime({ v: 3, type: 'adventure.step', payload: { action } }); }
+  sendAdventureStep(action: AdventureInput, entityId?: string | null) {
+    // Ordinary movement never awaits this promise. Portal transfer uses it as a barrier.
+    this.adventureCheckpoint = new Promise<void>((resolve, reject) => {
+      const cleanup = () => { window.clearTimeout(timer); this.off('adventure.state', confirmed); };
+      const confirmed = (change: { entityId: string; step: number; epoch?: number; correction?: boolean }) => {
+        if (entityId && change.entityId !== entityId) return;
+        if (change.correction) { cleanup(); reject(new Error('ADVENTURE_CORRECTION')); }
+        else if (change.step === action.step && (change.epoch ?? 0) === (action.epoch ?? 0)) { cleanup(); resolve(); }
+      };
+      const timer = window.setTimeout(() => { cleanup(); reject(new Error('ADVENTURE_CHECKPOINT_TIMEOUT')); }, 10000);
+      this.on('adventure.state', confirmed);
+      this.sendRealtime({ v: 3, type: 'adventure.step', payload: { action } });
+    });
+    void this.adventureCheckpoint.catch(() => {});
+  }
+  waitAdventureCheckpoint(): Promise<void> { return this.adventureCheckpoint; }
   sendPause(action: PauseInput) { this.sendRealtime({v:2,type:'player.pauseChanged',payload:{action}}); }
   sendPlayerState(action: StateInput) { this.sendRealtime({v:2,type:'player.state',payload:{action}}); }
   sendPlayerDeath(action: DeathInput): boolean { if (this.socket?.readyState !== WebSocket.OPEN) return false; this.sendRealtime({v:2,type:'player.died',payload:{action}}); return true; }

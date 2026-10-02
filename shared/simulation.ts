@@ -29,6 +29,7 @@ export type SimPlayer = {
   spawnIndex?: number;
   adventure?: AdventureState;
   adventureStep?: number;
+  adventureEpoch?: number;
 };
 export type ReplayTrajectory = {
   startPosition: Axis;

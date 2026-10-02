@@ -12,6 +12,8 @@ export type SnakeState = {
   adventure?: AdventureState;
 };
 
+export type AdventureInput = SnakeState & { step: number; epoch?: number; moves?: Array<{ direction: Axis; up: Axis }> };
+
 export type DirectionInput = {
   type: 'direction';
   seq: number;
@@ -82,7 +84,7 @@ export type PlayerDied = {
 };
 
 export type RealtimeClientMessage =
-  | { v: 3; type: 'adventure.step'; payload: { action: SnakeState & { step: number } } }
+  | { v: 3; type: 'adventure.step'; payload: { action: AdventureInput } }
   | { v: 2; type: 'ping' | 'room.resync' }
   | { v: 2; type: 'player.appearance'; payload: { appearance: SnakeAppearance } }
   | { v: 2; type: 'player.directionChanged'; payload: { action: DirectionInput } }
@@ -91,7 +93,7 @@ export type RealtimeClientMessage =
   | { v: 2; type: 'player.died'; payload: { action: DeathInput } };
 
 export type RealtimeServerMessage =
-  | { v: 3; type: 'adventure.state'; payload: { entityId: string; step: number; state: SnakeState } }
+  | { v: 3; type: 'adventure.state'; payload: { entityId: string; step: number; state: SnakeState; correction?: boolean; epoch?: number } }
   | { v: 2; type: 'pong' }
   | { v: 2; type: 'room.state'; payload: RoomSnapshot }
   | { v: 2; type: 'room.syncRequested'; payload: { requestId: string } }
