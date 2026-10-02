@@ -1,5 +1,6 @@
 import { DEFAULT_SNAKE_APPEARANCE, normalizeSnakeAppearance, type SnakeAppearance } from './appearance';
 import { generationSeed } from './roomCoordinates';
+import type { AdventureState, AdventureReplayEvent, RoomDefinition } from './adventure';
 
 /** Deterministic, renderer-free rules used by both the browser and the Room DO. */
 export type Axis = { x: number; y: number; z: number };
@@ -26,6 +27,8 @@ export type SimPlayer = {
   lastInputSeq?: number;
   lastStateSeq?: number;
   spawnIndex?: number;
+  adventure?: AdventureState;
+  adventureStep?: number;
 };
 export type ReplayTrajectory = {
   startPosition: Axis;
@@ -35,8 +38,13 @@ export type ReplayTrajectory = {
   spawnIndex: number;
   initialSpeed: number;
   changes: Array<{ position: Axis; direction: Axis }>;
+  adventureVersion?: number;
+  initialAdventure?: AdventureState;
+  initialGrowth?: number;
+  events?: AdventureReplayEvent[];
 };
 export type SimulationState = {
+  definition?: RoomDefinition;
   seed: number;
   tick: number;
   food: Food[];

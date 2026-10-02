@@ -14,8 +14,12 @@ import { ReplayPlayer, fromVec3 } from '../core/ReplaySystem';
 import type { ReplayData } from '../types/replay';
 import { getSpawnPoint, SPAWN_POINTS } from './SpawnPoints';
 import { normalizeSnakeAppearance, type SnakeAppearance } from '../../shared/appearance';
+import { copy, type AdventureReplayEvent, type AdventureState } from '../../shared/adventure';
 
 export class Phantom {
+    public adventure?: AdventureState;
+    private adventureEvents: AdventureReplayEvent[];
+    private adventureStep = 0;
     public segments: THREE.Vector3[] = [];
     public direction: THREE.Quaternion = new THREE.Quaternion();
     public readonly replayPlayer: ReplayPlayer;
@@ -41,6 +45,7 @@ export class Phantom {
     private _tempVec: THREE.Vector3 = new THREE.Vector3();
 
     constructor(replayData: ReplayData, colorIndex: number = 0) {
+        this.adventureEvents = replayData.adventureEvents ?? [];
         this.replayPlayer = new ReplayPlayer(replayData);
 
         // Призрачные цвета для разных фантомов
@@ -111,7 +116,9 @@ export class Phantom {
             : [position.clone(), position.clone().add(backVector.clone()), position.clone().add(backVector.clone().multiplyScalar(2))];
 
         this.accumulatedTime = 0;
-        this.growthPending = 0;
+        this.growthPending = params.initialGrowth ?? 0;
+        this.adventure = params.initialAdventure ? copy(params.initialAdventure) : undefined;
+        this.adventureStep = 0;
         this.isDead = false;
         this.currentSPM = this.replayPlayer.getInitialSpeed();
         this.currentScore = params.initialScore ?? 0;
@@ -172,6 +179,16 @@ export class Phantom {
 
             // Делаем шаг
             this.step();
+            this.adventureStep++;
+            const event = this.adventureEvents.find(e => e.step === this.adventureStep);
+            if (event) {
+                this.segments = event.snake.segments.map(fromVec3);
+                this.currentSPM = event.snake.speed;
+                this.currentScore = event.snake.score;
+                this.growthPending = event.snake.growth;
+                this.adventure = copy(event.snake.adventure);
+                this.setMoveDirection(fromVec3(event.snake.direction));
+            }
             return true;
         }
 

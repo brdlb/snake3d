@@ -55,8 +55,8 @@ export function generationSeed(seed: number): number {
 export type GridPosition = { x: number; y: number; z: number };
 
 /** The head must step through the single central cell of a face. */
-export function crossedPortal(head: GridPosition, length: number): PortalDirection | null {
-  if (length < PORTAL_MIN_LENGTH) return null;
+export function crossedPortal(head: GridPosition, _length?: number): PortalDirection | null {
+  void _length;
   const middle = (a: number, b: number) =>
     Math.abs(a - PORTAL_CENTER) <= PORTAL_RADIUS && Math.abs(b - PORTAL_CENTER) <= PORTAL_RADIUS;
   if (head.x === ROOM_SIZE + 1 && middle(head.y, head.z)) return 'xp';

@@ -18,6 +18,7 @@ export interface PlayerInfo {
 export class GameHUD {
     private container!: HTMLElement;
     private playersContainer!: HTMLElement;
+    private adventureContainer!: HTMLElement;
 
     constructor() {
         this.createUI();
@@ -31,6 +32,9 @@ export class GameHUD {
         this.playersContainer.className = 'hud-players';
 
         this.container.appendChild(this.playersContainer);
+        this.adventureContainer = document.createElement('div');
+        this.adventureContainer.className = 'hud-adventure';
+        this.container.appendChild(this.adventureContainer);
         document.body.appendChild(this.container);
     }
 
@@ -200,6 +204,14 @@ export class GameHUD {
         if (control) {
             control.style.display = visible ? 'flex' : 'none';
         }
+    }
+
+    public updateAdventure(lines: string[]): void {
+        this.adventureContainer.replaceChildren(...lines.map(line => {
+            const row = document.createElement('div');
+            row.textContent = line.toUpperCase();
+            return row;
+        }));
     }
 
     private async loadVersion(element: HTMLElement) {

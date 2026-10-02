@@ -1345,3 +1345,13 @@ body, body * {
 body input::placeholder, body textarea::placeholder {
   text-transform: uppercase;
 }
+/* Personal portal objectives follow the existing HUD typography. */
+.hud-adventure {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    font-size: 11px;
+    line-height: 1.6;
+    max-width: min(420px, 80vw);
+    overflow-wrap: anywhere;
+}

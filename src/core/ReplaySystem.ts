@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 import type { Vec3, TrajectoryChange, ReplayData, StartParams } from '../types/replay';
+import { copy, type AdventureSnake, type AdventureReplayEvent } from '../../shared/adventure';
 
 /**
  * Конвертация THREE.Vector3 в сериализуемый Vec3
@@ -34,6 +35,7 @@ export class ReplayRecorder {
     private startParams: StartParams;
     private isRecording: boolean = false;
     private lastDirection: THREE.Vector3 = new THREE.Vector3();
+    private adventureEvents: AdventureReplayEvent[] = [];
 
     constructor(seed: number, spawnIndex: number, initialSpeed: number = 300) {
         this.startParams = { seed, spawnIndex, initialSpeed };
@@ -60,6 +62,17 @@ export class ReplayRecorder {
 
     public setInitialScore(score: number): void {
         this.startParams.initialScore = score;
+    }
+    public setAdventureStart(snake: AdventureSnake): void {
+        this.startParams.adventureVersion = snake.adventure.version;
+        this.startParams.initialAdventure = copy(snake.adventure);
+        this.startParams.initialGrowth = snake.growth;
+        this.startParams.startSegments = copy(snake.segments);
+        this.startParams.initialScore = snake.score;
+        this.startParams.initialSpeed = snake.speed;
+    }
+    public recordAdventure(step: number, snake: AdventureSnake): void {
+        if (this.isRecording) this.adventureEvents.push({ step, snake: copy(snake) });
     }
 
     /**
@@ -99,7 +112,8 @@ export class ReplayRecorder {
             finalScore,
             deathPosition: toVec3(deathPosition),
             trajectoryLog: [...this.trajectoryLog],
-            playerName
+            playerName,
+            adventureEvents: copy(this.adventureEvents)
         };
     }
 
@@ -109,6 +123,7 @@ export class ReplayRecorder {
     public reset(seed: number, spawnIndex: number, initialSpeed: number = 300): void {
         this.trajectoryLog = [];
         this.startParams = { seed, spawnIndex, initialSpeed };
+        this.adventureEvents = [];
         this.isRecording = false;
     }
 
@@ -153,7 +168,10 @@ export class ReplayPlayer {
             startPosition: legacyStartParams?.startPosition,
             startDirection: legacyStartParams?.startDirection,
             startSegments: legacyStartParams?.startSegments,
-            initialScore: legacyStartParams?.initialScore
+            initialScore: legacyStartParams?.initialScore,
+            adventureVersion: legacyStartParams?.adventureVersion,
+            initialAdventure: legacyStartParams?.initialAdventure,
+            initialGrowth: legacyStartParams?.initialGrowth
         };
         this.deathPosition = fromVec3(replayData.deathPosition);
         this.replayId = replayData.id;

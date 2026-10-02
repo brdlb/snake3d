@@ -6,6 +6,7 @@
  */
 
 import type { SnakeAppearance } from '../../shared/appearance';
+import type { AdventureState, AdventureReplayEvent, RoomDefinition } from '../../shared/adventure';
 
 // 3D вектор для хранения (сериализуемый)
 export interface Vec3 {
@@ -29,6 +30,9 @@ export interface StartParams {
     startDirection?: Vec3; // Точное начальное направление
     startSegments?: Vec3[]; // Body carried through a portal
     initialScore?: number;
+    adventureVersion?: number;
+    initialAdventure?: AdventureState;
+    initialGrowth?: number;
 }
 
 // Полные данные реплея
@@ -43,6 +47,7 @@ export interface ReplayData {
     appearance?: SnakeAppearance;
     deathPosition: Vec3;           // Позиция смерти
     trajectoryLog: TrajectoryChange[];  // Лог изменений траектории
+    adventureEvents?: AdventureReplayEvent[];
 }
 
 // Данные комнаты от сервера
@@ -51,6 +56,8 @@ export interface RoomData {
     phantoms: ReplayData[];
     playerSpawnIndex: number; // Назначенная сервером точка спавна (0-3)
     playerSpawn?: { position: Vec3; direction: Vec3; up: Vec3 };
+    definition?: RoomDefinition;
+    initialState?: import('../../shared/adventure').AdventureSnake;
 }
 
 export interface RoomSummary {

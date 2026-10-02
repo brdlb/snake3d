@@ -10,6 +10,8 @@
         "lint": "eslint . --ext .ts",
         "cf:dev": "wrangler dev",
         "cf:test": "vitest run",
+        "check:worker": "tsc -p tsconfig.worker.json",
+        "adventure:smoke": "tsx scripts/adventure-smoke.ts",
         "cf:deploy": "wrangler deploy",
         "cf:migrate": "wrangler d1 migrations apply snake3d --remote"
     },

@@ -139,6 +139,9 @@ export class Snake {
         this.growthPending++;
     }
 
+    public getPendingGrowth(): number { return this.growthPending; }
+    public setPendingGrowth(growth: number): void { this.growthPending = Math.max(0, Math.floor(growth)); }
+
     public getHead(): THREE.Vector3 {
         return this.segments[0];
     }

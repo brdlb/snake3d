@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { WallMaterial } from './WallMaterial';
 import { PORTAL_APERTURE, PORTAL_FRAME_SIZE } from '../../shared/roomCoordinates';
 import { FOOD_COLORS } from '../entities/World';
+import type { RoomDefinition } from '../../shared/adventure';
+import type { PortalDirection } from '../../shared/roomCoordinates';
 
 export class SceneManager {
     public renderer: THREE.WebGLRenderer;
@@ -18,6 +20,9 @@ export class SceneManager {
     private portalMaskTexture: THREE.Texture | undefined;
     private updatePortalLabel?: (remaining: number) => void;
     private portalRemaining: number | null = null;
+    private interactionGroup = new THREE.Group();
+    private adventureLabelTextures: THREE.CanvasTexture[] = [];
+    private portalLabels = new Map<THREE.Mesh, { material: THREE.MeshBasicMaterial; canvas?: HTMLCanvasElement; text?: string }>();
 
     constructor(fov: number) {
         // Renderer
@@ -84,6 +89,7 @@ export class SceneManager {
         const strip = (wallSize - aperture) / 2;
         const center = (wallSize + aperture) / 4;
         this.wallMesh = new THREE.Group();
+        this.portalLabels.clear();
         this.portalGates = [];
         const labelCanvas = document.createElement('canvas');
         labelCanvas.width = 1536;
@@ -128,7 +134,7 @@ export class SceneManager {
             [new THREE.Vector3(0, wallSize / 2, 0), new THREE.Euler(-Math.PI / 2, 0, 0)],
             [new THREE.Vector3(0, -wallSize / 2, 0), new THREE.Euler(Math.PI / 2, 0, 0)],
         ];
-        for (const [position, rotation] of faces) {
+        for (const [faceIndex, [position, rotation]] of faces.entries()) {
             const face = new THREE.Group();
             face.position.copy(position);
             face.rotation.copy(rotation);
@@ -147,10 +153,12 @@ export class SceneManager {
             );
             face.add(gate);
             this.portalGates.push(gate);
+            gate.userData.direction = (['zp', 'zn', 'xp', 'xn', 'yp', 'yn'] as PortalDirection[])[faceIndex];
             const labelWidth = frameSize;
             const labelHeight = 0.5;
             const labelGeometry = new THREE.PlaneGeometry(labelWidth, labelHeight);
             const labelMaterial = new THREE.MeshBasicMaterial({ map: this.portalLabelTexture, transparent: true, depthWrite: false, toneMapped: false });
+            this.portalLabels.set(gate, { material: labelMaterial });
             // Put one label along every edge of the opening, on both sides of the wall.
             for (const side of [1, -1]) {
                 const labelSide = new THREE.Group();
@@ -204,6 +212,65 @@ export class SceneManager {
         }
     }
 
+    public setAdventureObjects(definition?: RoomDefinition): void {
+        this.scene.remove(this.interactionGroup);
+        this.interactionGroup.traverse(object => {
+            if (object instanceof THREE.Mesh) { object.geometry.dispose(); (object.material as THREE.Material).dispose(); }
+            if (object instanceof THREE.Sprite) { (object.material as THREE.SpriteMaterial).map?.dispose(); (object.material as THREE.Material).dispose(); }
+        });
+        this.interactionGroup = new THREE.Group();
+        for (const texture of this.adventureLabelTextures) texture.dispose();
+        this.adventureLabelTextures = [];
+        for (const label of this.portalLabels.values()) {
+            delete label.canvas; delete label.text;
+            label.material.map = this.portalLabelTexture ?? null;
+            label.material.needsUpdate = true;
+        }
+        if (!definition) return;
+        const colors = { MASS: 0x86e184, TEMPO: 0xfaa35c, ENERGY: 0x63cfff, TUNING: 0xf285ce, CIRCUIT: 0xe1d470 };
+        for (const object of definition.interactions) {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), new THREE.MeshBasicMaterial({ color: colors[object.theme], wireframe: ['CONTACT', 'BEACON'].includes(object.kind) }));
+            mesh.position.set(object.position.x, object.position.y, object.position.z);
+            this.interactionGroup.add(mesh);
+            const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 96;
+            const context = canvas.getContext('2d');
+            const details = object.kind === 'MASS_CONVERTER' ? '-3 LENGTH · +1 CHARGE' : object.kind === 'GROWER' ? '+3 LENGTH' : object.kind === 'ACCELERATOR' ? '+50 SPM' : object.kind === 'BRAKE' ? '-50 SPM · COST 1 CHARGE' : object.kind === 'DYNAMO' ? `+1 CHARGE · ${object.minSpeed ?? 60}+ SPM` : object.kind === 'TEMPORARY' ? 'LIVE CHARGE · ACTIVE TIME' : object.kind === 'CLEANER' ? 'NEUTRAL POLARITY' : object.polarity ?? object.coating ?? object.theme;
+            if (context) { context.font = '24px monospace'; context.fillStyle = '#ffffff'; context.textAlign = 'center'; context.fillText(`${object.kind.split('_').join(' ')} ${object.order === undefined ? '' : object.order + 1}`, 256, 36); context.font = '18px monospace'; context.fillText(details, 256, 68, 500); }
+            const texture = new THREE.CanvasTexture(canvas);
+            const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthWrite: false }));
+            label.position.copy(mesh.position).add(new THREE.Vector3(0, 1, 0)); label.scale.set(4, 0.75, 1);
+            this.interactionGroup.add(label);
+        }
+        this.scene.add(this.interactionGroup);
+    }
+
+    public setAdventurePortals(states: Array<{ direction: PortalDirection; enabled: boolean; open: boolean; label: string }>): void {
+        for (const gate of this.portalGates) {
+            const state = states.find(s => s.direction === gate.userData.direction);
+            if (!state) continue;
+            const material = gate.material as THREE.MeshBasicMaterial;
+            material.color.setHex(!state.enabled ? 0x303030 : state.open ? 0xffffff : 0x3388cc);
+            material.transparent = state.enabled;
+            material.map = state.enabled ? this.portalMaskTexture ?? null : null;
+            material.needsUpdate = true;
+            const label = this.portalLabels.get(gate)!;
+            let canvas = label.canvas;
+            if (!canvas) {
+                canvas = document.createElement('canvas'); canvas.width = 1536; canvas.height = 256;
+                label.canvas = canvas;
+                const texture = new THREE.CanvasTexture(canvas);
+                this.adventureLabelTextures.push(texture);
+                label.material.map = texture;
+                label.material.needsUpdate = true;
+            }
+            if (label.text === state.label) continue;
+            label.text = state.label;
+            const ctx = canvas.getContext('2d');
+            if (ctx) { ctx.clearRect(0, 0, 1536, 256); ctx.fillStyle = '#ffffff'; ctx.font = '48px monospace'; ctx.textAlign = 'center'; ctx.fillText(state.label.toUpperCase(), 768, 145, 1500); }
+            label.material.map!.needsUpdate = true;
+        }
+    }
+
     public shiftPreviousRooms(offset: THREE.Vector3): void {
         for (const room of this.previousWallMeshes) room.position.sub(offset);
     }
@@ -211,6 +278,23 @@ export class SceneManager {
     public showPreviousRoom(offset: THREE.Vector3): THREE.Group | null {
         if (!this.wallMesh) return null;
         const previous = this.wallMesh.clone(true);
+        const materials = new Map<THREE.Material, THREE.Material>();
+        const textures = new Map<THREE.Texture, THREE.Texture>();
+        previous.traverse(object => {
+            if (!(object instanceof THREE.Mesh)) return;
+            const original = object.material as THREE.MeshBasicMaterial;
+            let material = materials.get(original) as THREE.MeshBasicMaterial | undefined;
+            if (!material) {
+                material = original.clone();
+                if (original.map) {
+                    let texture = textures.get(original.map);
+                    if (!texture) { texture = original.map.clone(); texture.needsUpdate = true; textures.set(original.map, texture); }
+                    material.map = texture;
+                }
+                materials.set(original, material);
+            }
+            object.material = material;
+        });
         previous.position.copy(this.wallMesh.position).sub(offset);
         this.previousWallMeshes.add(previous);
         this.scene.add(previous);
@@ -220,11 +304,15 @@ export class SceneManager {
     public removePreviousRoom(room: THREE.Group): void {
         this.scene.remove(room);
         this.previousWallMeshes.delete(room);
+        const materials = new Set<THREE.MeshBasicMaterial>();
+        const textures = new Set<THREE.Texture>();
+        room.traverse(object => { if (object instanceof THREE.Mesh) materials.add(object.material as THREE.MeshBasicMaterial); });
+        for (const material of materials) { if (material.map) textures.add(material.map); material.dispose(); }
+        for (const texture of textures) texture.dispose();
     }
 
     public clearPreviousRooms(): void {
-        for (const room of this.previousWallMeshes) this.scene.remove(room);
-        this.previousWallMeshes.clear();
+        for (const room of [...this.previousWallMeshes]) this.removePreviousRoom(room);
     }
 
     public setWallsVisible(visible: boolean): void {

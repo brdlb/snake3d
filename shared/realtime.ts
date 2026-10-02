@@ -1,5 +1,6 @@
 import type { Axis, Food, SimPlayer } from './simulation';
 import type { SnakeAppearance } from './appearance';
+import type { AdventureState, RoomDefinition } from './adventure';
 
 export type SnakeState = {
   segments: Axis[];
@@ -7,6 +8,8 @@ export type SnakeState = {
   up: Axis;
   score: number;
   speed: number;
+  growth?: number;
+  adventure?: AdventureState;
 };
 
 export type DirectionInput = {
@@ -48,6 +51,7 @@ export type RoomSnapshot = {
   serverTime: number;
   food: Food[];
   players: SimPlayer[];
+  definition?: RoomDefinition;
 };
 
 export type PlayerDirectionChanged = Omit<DirectionInput, 'type'> & {
@@ -78,6 +82,7 @@ export type PlayerDied = {
 };
 
 export type RealtimeClientMessage =
+  | { v: 3; type: 'adventure.step'; payload: { action: SnakeState & { step: number } } }
   | { v: 2; type: 'ping' | 'room.resync' }
   | { v: 2; type: 'player.appearance'; payload: { appearance: SnakeAppearance } }
   | { v: 2; type: 'player.directionChanged'; payload: { action: DirectionInput } }
@@ -86,6 +91,7 @@ export type RealtimeClientMessage =
   | { v: 2; type: 'player.died'; payload: { action: DeathInput } };
 
 export type RealtimeServerMessage =
+  | { v: 3; type: 'adventure.state'; payload: { entityId: string; step: number; state: SnakeState } }
   | { v: 2; type: 'pong' }
   | { v: 2; type: 'room.state'; payload: RoomSnapshot }
   | { v: 2; type: 'room.syncRequested'; payload: { requestId: string } }
@@ -106,5 +112,5 @@ export type RealtimeServerMessage =
 export function isRealtimeServerMessage(value: unknown): value is RealtimeServerMessage {
   if (!value || typeof value !== 'object') return false;
   const message = value as { v?: unknown; type?: unknown };
-  return message.v === 2 && typeof message.type === 'string';
+  return (message.v === 2 || message.v === 3) && typeof message.type === 'string';
 }

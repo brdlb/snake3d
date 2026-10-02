@@ -1,7 +1,9 @@
+import { ROOM_LIST_QUERY } from './roomQueries';
 import {
   addPlayer,
   chooseLowestPhantom,
   createSimulation,
+  foodEffect,
   safeSpawn,
   validInput,
   validOrientation,
@@ -19,7 +21,11 @@ import type {
   RealtimeClientMessage,
   StateInput,
 } from '../shared/realtime';
+import { ADVENTURE_VERSION, advanceCoatings, applyInteractions, checkPortal, checkpointBlocked, copy, enterAdventure, moveAdventure, newAdventure, samePosition, transitionAdventure, validAdventureRoom, type AdventureSnake, type EntryCheckpoint, type RoomDefinition } from '../shared/adventure';
+import { adventureEnabled, adventureStatement, loadAdventure } from './adventureStore';
+import { generateSharedRoom, validateRoomDefinition } from '../shared/adventureGeneration';
 export interface Env {
+  ADVENTURE_ENABLED?: string;
   DB: D1Database;
   ROOMS: DurableObjectNamespace;
   ASSETS: Fetcher;
@@ -41,6 +47,8 @@ type User = {
 };
 type RoomAction = 'initial' | 'resume' | 'restart' | 'next' | 'join' | 'spectate';
 type RoomData = {
+  definition?: RoomDefinition;
+  initialState?: AdventureSnake;
   seed: number;
   phantoms: unknown[];
   playerSpawnIndex: number;
@@ -239,7 +247,7 @@ export function chooseSpawn(
   const used = new Set(
     phantoms
       .map((p) => p.startParams?.spawnIndex)
-      .filter((v): v is number => Number.isInteger(v) && v >= 0 && v < 4),
+      .filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < 4),
   );
   const free = [0, 1, 2, 3].filter((index) => !used.has(index));
   const alternatives = free.filter((index) => index !== previousSpawnIndex);
@@ -263,17 +271,68 @@ export function replayReplacementOrder(replaySaved: boolean, evictRoomReplay: bo
   return [...(evictRoomReplay ? ['deleteRoomMinimum'] : []), 'insertReplay'] as const;
 }
 
-export const ROOM_LIST_QUERY = `SELECT
-  r.seed AS seed,
-  r.total_games_played AS gamesPlayed,
-  MAX(CASE WHEN s.spawn_index = 0 THEN s.best_score END) AS spawn0,
-  MAX(CASE WHEN s.spawn_index = 1 THEN s.best_score END) AS spawn1,
-  MAX(CASE WHEN s.spawn_index = 2 THEN s.best_score END) AS spawn2,
-  MAX(CASE WHEN s.spawn_index = 3 THEN s.best_score END) AS spawn3
-FROM rooms r
-LEFT JOIN room_spawn_records s ON s.room_seed = r.seed
-GROUP BY r.seed, r.total_games_played
-ORDER BY r.updated_at DESC, r.seed ASC`;
+
+
+async function transferAdventure(env: Env, user: User, input: { fromSeed: number; direction: PortalDirection; state: StateInput; transferId: string }, requestId: string): Promise<Response> {
+  const { fromSeed, direction, transferId } = input;
+  if (typeof transferId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(transferId)) return fail('INVALID_TRANSFER_ID', 400, requestId);
+  const old = await env.DB.prepare('SELECT user_id,from_seed,to_seed,status,result_json FROM adventure_transfers WHERE id=?').bind(transferId).first<{ user_id: string; from_seed: number; to_seed: number; status: string; result_json: string }>();
+  const targetSeed = roomSeed(adjacentRoom(roomCoordinates(fromSeed)!, direction));
+  if (!validAdventureRoom(targetSeed)) return fail('WORLD_EDGE', 409, requestId);
+  if (old && (old.user_id !== user.id || old.from_seed !== fromSeed || old.to_seed !== targetSeed)) return fail('TRANSFER_CONTEXT_MISMATCH', 409, requestId);
+  const source = env.ROOMS.get(env.ROOMS.idFromName(String(fromSeed)));
+  const target = env.ROOMS.get(env.ROOMS.idFromName(String(targetSeed)));
+  const call = (room: DurableObjectStub, path: string, data: unknown) => room.fetch(`https://room/${path}`, { method: 'POST', body: JSON.stringify(data) });
+  if (old?.status === 'COMMITTED') {
+    const result = JSON.parse(old.result_json) as RoomData & { checkpoint: EntryCheckpoint };
+    await call(source, 'adventure-release', { userId: user.id, transferId, committed: true });
+    const committed = await call(target, 'adventure-commit', { user, transferId, checkpoint: result.checkpoint });
+    if (!committed.ok) return fail('PORTAL_TRANSFER_PENDING', 503, requestId);
+    await call(source, 'adventure-release', { userId: user.id, transferId, committed: true });
+    return json(result, 200, requestId);
+  }
+  const assignment = await env.DB.prepare('SELECT room_seed FROM room_assignments WHERE user_id=?').bind(user.id).first<{ room_seed: number }>();
+  if (assignment?.room_seed !== fromSeed) return fail('ROOM_CONTEXT_MISMATCH', 409, requestId);
+  const prepared = await call(source, 'adventure-prepare', { userId: user.id, ...input });
+  if (!prepared.ok) return prepared;
+  const { checkpoint } = await prepared.json<{ checkpoint: EntryCheckpoint }>();
+  let reserved: Response;
+  try { reserved = await call(target, 'adventure-reserve', { user, transferId, checkpoint }); }
+  catch (error) { await call(source, 'adventure-release', { userId: user.id, transferId, committed: false }); throw error; }
+  if (!reserved.ok) {
+    await call(source, 'adventure-release', { userId: user.id, transferId, committed: false });
+    return reserved;
+  }
+  const reservedData = await reserved.json<{ definition: RoomDefinition }>();
+  const result: RoomData & { checkpoint: EntryCheckpoint } = { seed: targetSeed, phantoms: [], playerSpawnIndex: 0, definition: reservedData.definition, initialState: checkpoint.snake, playerSpawn: { position: checkpoint.snake.segments[0], direction: checkpoint.snake.direction, up: checkpoint.snake.up }, checkpoint };
+  const time = now();
+  try {
+    await env.DB.batch([
+      env.DB.prepare('INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)').bind(targetSeed, Math.floor(user.elo / 100), time),
+      adventureStatement(env, user.id, checkpoint, checkpoint.snake.adventure.path),
+      env.DB.prepare('INSERT INTO adventure_transfers(id,user_id,from_seed,to_seed,status,result_json,updated_at) VALUES(?,?,?,?,?,?,?)').bind(transferId, user.id, fromSeed, targetSeed, 'COMMITTED', JSON.stringify(result), time),
+      env.DB.prepare('UPDATE users SET last_room_seed=?,last_seen=? WHERE id=?').bind(targetSeed, time, user.id),
+      env.DB.prepare('UPDATE room_assignments SET room_seed=?,spawn_index=0,assigned_at=? WHERE user_id=?').bind(targetSeed, time, user.id),
+      env.DB.prepare('DELETE FROM room_players WHERE user_id=?').bind(user.id),
+      env.DB.prepare('INSERT INTO room_players(room_seed,user_id,spawn_index,joined_at) VALUES(?,?,0,?)').bind(targetSeed, user.id, time),
+      env.DB.prepare('INSERT INTO user_room_visits(user_id,room_seed,visited_at) VALUES(?,?,?) ON CONFLICT(user_id,room_seed) DO NOTHING').bind(user.id, targetSeed, time),
+    ]);
+  } catch (error) {
+    // A lost D1 response may conceal a successful transaction. Consult the
+    // idempotency row before releasing either side's reservation.
+    const committed = await env.DB.prepare('SELECT status FROM adventure_transfers WHERE id=?').bind(transferId).first<{ status: string }>();
+    if (committed?.status !== 'COMMITTED') {
+      await call(target, 'adventure-cancel', { transferId });
+      await call(source, 'adventure-release', { userId: user.id, transferId, committed: false });
+      throw error;
+    }
+  }
+  await call(source, 'adventure-release', { userId: user.id, transferId, committed: true });
+  const committed = await call(target, 'adventure-commit', { user, transferId, checkpoint });
+  if (!committed.ok) return fail('PORTAL_TRANSFER_PENDING', 503, requestId);
+  await call(source, 'adventure-release', { userId: user.id, transferId, committed: true });
+  return json(result, 200, requestId);
+}
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -412,6 +471,7 @@ export default {
       let seed: number;
       try { seed = roomSeed(coordinates as { x: number; y: number; z: number }); }
       catch { return fail('WORLD_EDGE', 400, requestId); }
+      if (adventureEnabled(env) && !validAdventureRoom(seed)) return fail('WORLD_EDGE', 400, requestId);
       await env.DB.prepare('INSERT OR IGNORE INTO rooms(seed,elo_bucket,updated_at) VALUES(?,?,?)')
         .bind(seed, Math.floor(user.elo / 100), now()).run();
       return json({ seed }, 200, requestId);
@@ -425,6 +485,10 @@ export default {
           !['xp', 'xn', 'yp', 'yn', 'zp', 'zn'].includes(direction) || !snakeState(state))
         return fail('INVALID_PORTAL', 400, requestId);
       const source = roomCoordinates(fromSeed as number);
+      if (adventureEnabled(env)) {
+        if (!source || !validAdventureRoom(fromSeed as number)) return fail('WORLD_EDGE', 409, requestId);
+        return transferAdventure(env, user, data as { fromSeed: number; direction: PortalDirection; state: StateInput; transferId: string }, requestId);
+      }
       if (!source || crossedPortal(state.segments[0], state.segments.length) !== direction)
         return fail('PORTAL_CLOSED', 409, requestId);
       const offset = portalOffset(direction as PortalDirection);
@@ -536,6 +600,7 @@ export default {
         return fail('INVALID_ROOM_ACTION', 400, requestId);
       if (p.action === 'join' || (p.action === 'spectate' && Number.isSafeInteger(p.seed))) {
         if (!Number.isSafeInteger(p.seed)) return fail('INVALID_ROOM_LINK', 400, requestId);
+        if (adventureEnabled(env) && !validAdventureRoom(p.seed as number)) return fail('WORLD_EDGE', 400, requestId);
         const exists = await env.DB.prepare('SELECT 1 FROM rooms WHERE seed=?')
           .bind(p.seed)
           .first();
@@ -558,6 +623,7 @@ export default {
     }
     const socket = path.match(/^\/api\/v1\/rooms\/(-?\d+)\/socket$/);
     if (socket && request.headers.get('upgrade') === 'websocket') {
+      if (adventureEnabled(env) && !validAdventureRoom(Number(socket[1]))) return fail('WORLD_EDGE', 400, requestId);
       const spectator = url.searchParams.get('spectator') === '1',
         restarting = url.searchParams.get('restart') === '1';
       if (spectator) {
@@ -629,8 +695,12 @@ export class RoomDurableObject {
     console.log(JSON.stringify({ event: 'game.save', ...trace }));
     await this.ctx.storage.put(`save-trace:${userId}`, trace);
   }
+  private definition(state: SimulationState): RoomDefinition {
+    return state.definition ??= generateSharedRoom(state.seed).room;
+  }
   private snapshot(state: SimulationState) {
     return {
+      ...(adventureEnabled(this.env) && validAdventureRoom(state.seed) ? { definition: this.definition(state) } : {}),
       seed: state.seed,
       tick: state.tick,
       serverTime: Date.now(),
@@ -661,6 +731,7 @@ export class RoomDurableObject {
       spawnIndex,
       initialSpeed: player.speed,
       changes: [],
+      ...(player.adventure ? { adventureVersion: ADVENTURE_VERSION, initialAdventure: copy(player.adventure), initialGrowth: player.growth, events: [] } : {}),
     };
   }
   private recordDirection(state: SimulationState, player: SimPlayer, position: Axis) {
@@ -674,6 +745,91 @@ export class RoomDurableObject {
     if (trajectory.changes.length > 10000)
       trajectory.changes.splice(0, trajectory.changes.length - 10000);
   }
+  private adventureSnake(player: SimPlayer): AdventureSnake {
+    return { segments: copy(player.segments), direction: { ...player.direction }, up: { ...player.up }, speed: player.speed, score: player.score, growth: player.growth, adventure: copy(player.adventure ?? newAdventure(player.segments.length, player.speed)) };
+  }
+  private installAdventure(state: SimulationState, user: User, checkpoint: EntryCheckpoint): SimPlayer {
+    for (const [id, p] of Object.entries(state.players)) if (p.id === user.id && !p.phantom) delete state.players[id];
+    const s = copy(checkpoint.snake);
+    const player = addPlayer(state, user.id, user.username, Date.now(), { segments: s.segments, direction: s.direction, up: s.up, score: s.score, entityId: crypto.randomUUID(), spawnIndex: 0, appearance: normalizeSnakeAppearance(user.settings?.snakeAppearance) });
+    Object.assign(player, { speed: s.speed, growth: s.growth, adventure: s.adventure, adventureStep: 0, disconnectedAt: Date.now() + 15000 });
+    this.startTrajectory(state, player, 0);
+    return player;
+  }
+  private async adventureRequest(path: string, request: Request): Promise<Response> {
+    if (!adventureEnabled(this.env)) return json({ error: { code: 'ADVENTURE_DISABLED' } }, 404);
+    const input = await request.json<any>();
+    if (path === '/adventure-assign') return this.assignAdventureRoom(input.action, input.contextSeed, input.user);
+    if (path === '/adventure-prepare') {
+      const { userId, direction, transferId, state: incoming } = input;
+      const simulation = this.simulation ?? await this.ctx.storage.get<SimulationState>('simulation');
+      const player = simulation && Object.values(simulation.players).find(p => p.id === userId && p.alive && !p.phantom);
+      if (!simulation || !player?.adventure || !snakeState(incoming) || crossedPortal(incoming.segments[0]) !== direction) return json({ error: { code: 'PORTAL_CLOSED' } }, 409);
+      const previous = await this.ctx.storage.get<{ transferId: string; checkpoint: EntryCheckpoint }>(`departure:${userId}`);
+      if (previous) return previous.transferId === transferId ? json(previous) : json({ error: { code: 'TRANSFER_IN_PROGRESS' } }, 409);
+      const offset = portalOffset(direction);
+      const axis = { x: Math.sign(offset.x), y: Math.sign(offset.y), z: Math.sign(offset.z) };
+      if (!samePosition(axis, incoming.direction) || !samePosition(incoming.segments[0], { x: player.segments[0].x + axis.x, y: player.segments[0].y + axis.y, z: player.segments[0].z + axis.z })) return json({ error: { code: 'INVALID_PORTAL_DIRECTION' } }, 409);
+      const moved = this.adventureSnake(player);
+      if (axis.x * moved.direction.x + axis.y * moved.direction.y + axis.z * moved.direction.z === -1 || (moved.growth > 0 ? moved.segments : moved.segments.slice(0, -1)).some(p => samePosition(p, incoming.segments[0]))) return json({ error: { code: 'INVALID_PORTAL_DIRECTION' } }, 409);
+      moved.segments.unshift(copy(incoming.segments[0]));
+      if (moved.growth > 0) moved.growth--; else moved.segments.pop();
+      moved.adventure.coatings = advanceCoatings(moved.adventure.coatings, moved.segments.length);
+      moved.direction = axis; moved.up = copy(incoming.up);
+      const transition = transitionAdventure(this.definition(simulation), direction, moved);
+      if (!transition) return json({ error: { code: checkPortal(this.definition(simulation), direction, moved).reason } }, 409);
+      transition.snake.segments = transition.snake.segments.map(p => ({ x: p.x - offset.x, y: p.y - offset.y, z: p.z - offset.z }));
+      const seed = roomSeed(adjacentRoom(roomCoordinates(simulation.seed)!, direction));
+      const checkpoint = enterAdventure(transition.snake, seed, transition.path);
+      await this.ctx.storage.put(`departure:${userId}`, { transferId, checkpoint, createdAt: Date.now() });
+      return json({ checkpoint });
+    }
+    if (path === '/adventure-reserve') {
+      const { user, checkpoint, transferId } = input as { user: User; checkpoint: EntryCheckpoint; transferId: string };
+      const state = await this.liveState(checkpoint.seed);
+      const validation = validateRoomDefinition(this.definition(state), checkpoint.snake);
+      if (validation.witnesses.some(w => !w.valid)) return json({ error: { code: 'ENTRY_ROUTE_UNAVAILABLE', detail: validation.rejected } }, 409);
+      const reservations = await this.ctx.storage.list<EntryCheckpoint>({ prefix: 'arrival:' });
+      const others = Object.values(state.players).filter(p => p.id !== user.id);
+      for (const [id, reservation] of reservations) if (id !== `arrival:${transferId}`) {
+        const meta = await this.ctx.storage.get<{ createdAt: number; userId: string }>(id.replace('arrival:', 'arrival-meta:'));
+        if (meta?.userId === user.id) continue;
+        if (!meta || Date.now() - meta.createdAt > 15000) {
+          const receipt = await this.env.DB.prepare('SELECT status FROM adventure_transfers WHERE id=?').bind(id.slice('arrival:'.length)).first<{ status: string }>();
+          if (receipt?.status !== 'COMMITTED') { await this.ctx.storage.delete(id); await this.ctx.storage.delete(id.replace('arrival:', 'arrival-meta:')); continue; }
+        }
+        others.push({ segments: reservation.snake.segments, alive: true } as SimPlayer);
+      }
+      if (checkpointBlocked(checkpoint, others)) return json({ error: { code: 'PORTAL_BLOCKED' } }, 409);
+      await this.ctx.storage.put({ [`arrival:${transferId}`]: checkpoint, [`arrival-meta:${transferId}`]: { createdAt: Date.now(), userId: user.id } });
+      return json({ reserved: true, definition: this.definition(state) });
+    }
+    if (path === '/adventure-cancel') { await this.ctx.storage.delete(`arrival:${input.transferId}`); await this.ctx.storage.delete(`arrival-meta:${input.transferId}`); return json({ cancelled: true }); }
+    if (path === '/adventure-commit') {
+      const { user, checkpoint, transferId } = input as { user: User; checkpoint: EntryCheckpoint; transferId: string };
+      if (await this.ctx.storage.get(`committed:${transferId}`)) return json({ committed: true });
+      const state = await this.liveState(checkpoint.seed);
+      if (checkpointBlocked(checkpoint, Object.values(state.players).filter(p => p.id !== user.id))) return json({ error: { code: 'PORTAL_BLOCKED' } }, 409);
+      this.installAdventure(state, user, checkpoint);
+      // Persist the player and receipt together, so retries never restore an
+      // old entry checkpoint over a player who has already continued moving.
+      await this.ctx.storage.put({ simulation: state, [`committed:${transferId}`]: true });
+      await this.ctx.storage.delete(`arrival:${transferId}`);
+      await this.ctx.storage.delete(`arrival-meta:${transferId}`);
+      this.broadcast({ v: 2, type: 'room.state', payload: this.snapshot(state) });
+      return json({ committed: true });
+    }
+    if (path === '/adventure-release') {
+      const departure = await this.ctx.storage.get<{ transferId: string }>(`departure:${input.userId}`);
+      if (departure?.transferId === input.transferId) {
+        if (input.committed && this.simulation) for (const [id, p] of Object.entries(this.simulation.players)) if (p.id === input.userId && !p.phantom) delete this.simulation.players[id];
+        await this.ctx.storage.delete(`departure:${input.userId}`);
+        if (this.simulation) { await this.persist(this.simulation); this.broadcast({ v: 2, type: 'room.state', payload: this.snapshot(this.simulation) }); }
+      }
+      return json({ released: true });
+    }
+    return json({ error: { code: 'NOT_FOUND' } }, 404);
+  }
   async alarm() {
     const state = this.simulation ?? (await this.ctx.storage.get<SimulationState>('simulation'));
     if (!state) return;
@@ -683,6 +839,7 @@ export class RoomDurableObject {
   }
   async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
+    if (path.startsWith('/adventure-')) return this.adventureRequest(path, request);
     if (path === '/diagnostics') {
       const userId = request.headers.get('x-user-id');
       const seed = Number(request.headers.get('x-seed'));
@@ -847,11 +1004,53 @@ export class RoomDurableObject {
       .first<{ spawn_index: number }>();
     const playerSpawnIndex = assignment?.spawn_index ?? 0;
     return {
+      ...(adventureEnabled(this.env) && validAdventureRoom(seed) ? { definition: this.simulation?.seed === seed ? this.definition(this.simulation) : generateSharedRoom(seed).room } : {}),
       seed,
       phantoms: [],
       playerSpawnIndex,
       playerSpawn,
     };
+  }
+  private async assignAdventure(action: RoomAction, contextSeed: number | undefined, user: User): Promise<Response> {
+    const record = await loadAdventure(this.env, user.id);
+    const seed = record && validAdventureRoom(record.checkpoint.seed) && action !== 'initial' ? record.checkpoint.seed : await ensureFirstRoom(this.env, user);
+    return this.env.ROOMS.get(this.env.ROOMS.idFromName(String(seed))).fetch('https://room/adventure-assign', { method: 'POST', body: JSON.stringify({ action, contextSeed, user }) });
+  }
+  private async assignAdventureRoom(action: RoomAction, contextSeed: number | undefined, user: User): Promise<Response> {
+    if (action === 'next') return json({ error: { code: 'USE_PORTAL' } }, 409);
+    const record = await loadAdventure(this.env, user.id);
+    const seed = record && validAdventureRoom(record.checkpoint.seed) && action !== 'initial' ? record.checkpoint.seed : await ensureFirstRoom(this.env, user);
+    if (action === 'restart' && contextSeed !== seed) return json({ error: { code: 'ROOM_CONTEXT_MISMATCH' } }, 409);
+    const state = await this.liveState(seed);
+    let player = Object.values(state.players).find(p => p.id === user.id && !p.phantom && p.alive && p.adventure);
+    let installedCheckpoint: EntryCheckpoint | undefined;
+    if (action === 'restart' || !player || action === 'initial') {
+      let checkpoint = record && action !== 'initial' && record.checkpoint.seed === seed ? record.checkpoint : null;
+      if (!checkpoint) {
+        const spawn = safeSpawn({ ...state, players: Object.fromEntries(Object.entries(state.players).filter(([, p]) => p.id !== user.id)) });
+        if (!spawn.safe) return json({ error: { code: 'RESPAWN BLOCKED' } }, 409);
+        const temporary = createSimulation(seed);
+        const initial = addPlayer(temporary, user.id, user.username, Date.now(), { spawnIndex: spawn.spawnIndex });
+        initial.adventure = newAdventure(initial.segments.length, initial.speed);
+        checkpoint = enterAdventure(this.adventureSnake(initial), seed, []);
+      }
+      if (checkpointBlocked(checkpoint, Object.values(state.players).filter(p => p.id !== user.id))) return json({ error: { code: 'RESPAWN BLOCKED' } }, 409);
+      const validation = validateRoomDefinition(this.definition(state), checkpoint.snake);
+      if (validation.witnesses.some(w => !w.valid)) return json({ error: { code: 'ENTRY_ROUTE_UNAVAILABLE', detail: validation.rejected } }, 409);
+      installedCheckpoint = checkpoint;
+    }
+    const time = now();
+    await this.env.DB.batch([
+      ...(installedCheckpoint ? [adventureStatement(this.env, user.id, installedCheckpoint, installedCheckpoint.snake.adventure.path)] : []),
+      this.env.DB.prepare('INSERT INTO room_assignments(user_id,room_seed,spawn_index,assigned_at) VALUES(?,?,0,?) ON CONFLICT(user_id) DO UPDATE SET room_seed=excluded.room_seed,spawn_index=0,assigned_at=excluded.assigned_at').bind(user.id, seed, time),
+      this.env.DB.prepare('INSERT INTO room_players(room_seed,user_id,spawn_index,joined_at) VALUES(?,?,0,?) ON CONFLICT(room_seed,user_id) DO UPDATE SET joined_at=excluded.joined_at').bind(seed, user.id, time),
+      this.env.DB.prepare('UPDATE users SET last_room_seed=?,last_seen=? WHERE id=?').bind(seed, time, user.id),
+      this.env.DB.prepare('INSERT INTO user_room_visits(user_id,room_seed,visited_at) VALUES(?,?,?) ON CONFLICT(user_id,room_seed) DO NOTHING').bind(user.id, seed, time),
+    ]);
+    if (installedCheckpoint) player = this.installAdventure(state, user, installedCheckpoint);
+    if (!player) return json({ error: { code: 'RESTART REQUIRED' } }, 409);
+    await this.persist(state);
+    return json({ ...await this.roomData(seed, user), initialState: this.adventureSnake(player), playerSpawn: { position: player.segments[0], direction: player.direction, up: player.up } });
   }
   private async assign({
     action,
@@ -864,6 +1063,7 @@ export class RoomDurableObject {
   }) {
     if (action === 'spectate')
       return json(await this.roomData(contextSeed ?? (await ensureFirstRoom(this.env, user)), user));
+    if (adventureEnabled(this.env)) return this.assignAdventure(action, contextSeed, user);
     const current = await this.env.DB.prepare(
       'SELECT room_seed,spawn_index FROM room_assignments WHERE user_id=?',
     )
@@ -912,6 +1112,7 @@ export class RoomDurableObject {
     return json(await this.roomData(seed, user));
   }
   private async join({ user, seed }: { user: User; seed: number }) {
+    if (adventureEnabled(this.env) && !validAdventureRoom(seed)) return json({ error: { code: 'WORLD_EDGE' } }, 409);
     const exists = await this.env.DB.prepare('SELECT 1 FROM rooms WHERE seed=?').bind(seed).first();
     if (!exists) return json({ error: { code: 'ROOM_NOT_FOUND' } }, 404);
     const state = await this.prepareState(seed);
@@ -938,6 +1139,12 @@ export class RoomDurableObject {
     const actualSpawn = player.spawnIndex ?? availableSpawn.spawnIndex;
     // Expire a reservation if the HTTP join is never followed by a socket.
     player.disconnectedAt = Date.now() + 15000;
+    if (adventureEnabled(this.env)) {
+      player.adventure = newAdventure(player.segments.length, player.speed);
+      player.adventureStep = 0;
+      const checkpoint = enterAdventure(this.adventureSnake(player), seed, []);
+      await adventureStatement(this.env, user.id, checkpoint, []).run();
+    }
     this.startTrajectory(state, player, actualSpawn);
     const time = now();
     await this.env.DB.batch([
@@ -1041,8 +1248,12 @@ export class RoomDurableObject {
           startDirection: terminal.trajectory.startDirection,
           startSegments: terminal.trajectory.startSegments,
           initialScore: terminal.trajectory.initialScore,
+          adventureVersion: terminal.trajectory.adventureVersion,
+          initialAdventure: terminal.trajectory.initialAdventure,
+          initialGrowth: terminal.trajectory.initialGrowth,
         },
         trajectoryLog: terminal.trajectory.changes,
+        adventureEvents: terminal.trajectory.events,
         timestamp: Date.now(),
         elo: user.elo,
         appearance: terminal.player.appearance,
@@ -1138,8 +1349,14 @@ export class RoomDurableObject {
           initialSpeed: terminal.trajectory.initialSpeed,
           startPosition: terminal.trajectory.startPosition,
           startDirection: terminal.trajectory.startDirection,
+          startSegments: terminal.trajectory.startSegments,
+          initialScore: terminal.trajectory.initialScore,
+          initialGrowth: terminal.trajectory.initialGrowth,
+          adventureVersion: terminal.trajectory.adventureVersion,
+          initialAdventure: terminal.trajectory.initialAdventure,
         },
         trajectoryLog: terminal.trajectory.changes,
+        adventureEvents: terminal.trajectory.events,
         timestamp: Date.now(),
         elo: user.elo,
         appearance: terminal.player.appearance,
@@ -1219,6 +1436,12 @@ export class RoomDurableObject {
         .bind(seed, user.id)
         .first<{ spawn_index: number }>();
       const spawnIndex = assigned?.spawn_index ?? 0;
+      if (adventureEnabled(this.env) && (!player || !player.alive || !player.adventure)) {
+        const record = await loadAdventure(this.env, user.id);
+        if (!record || record.checkpoint.seed !== seed) return json({ error: { code: 'RESTART REQUIRED' } }, 409);
+        if (checkpointBlocked(record.checkpoint, Object.values(state.players).filter(p => p.id !== user.id))) return json({ error: { code: 'RESPAWN BLOCKED' } }, 409);
+        player = this.installAdventure(state, user, record.checkpoint);
+      }
       if (!player || !player.alive) {
         const availableSpawn = safeSpawn(state, undefined, spawnIndex);
         if (!availableSpawn.safe) return json({ error: { code: 'ROOM_FULL' } }, 409);
@@ -1281,7 +1504,13 @@ export class RoomDurableObject {
     this.presence();
     return new Response(null, { status: 101, webSocket: client });
   }
+  private messageQueue: Promise<void> = Promise.resolve();
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    const task = this.messageQueue.then(() => this.receiveWebSocketMessage(ws, message));
+    this.messageQueue = task.catch(() => {});
+    await task;
+  }
+  private async receiveWebSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     let deathContext: { seed: number; submissionId: string } | null = null;
     try {
       const event = JSON.parse(String(message)) as RealtimeClientMessage,
@@ -1295,7 +1524,7 @@ export class RoomDurableObject {
         };
       if (event?.type === 'player.died' && typeof event.payload?.action?.submissionId === 'string')
         deathContext = { seed: attachment.seed, submissionId: event.payload.action.submissionId };
-      if (event?.v !== 2) {
+      if (event?.v !== 2 && event?.v !== 3) {
         if (deathContext) {
           await this.saveStage(attachment.seed, attachment.userId, deathContext.submissionId, 'rejected', 'INVALID_PROTOCOL_VERSION');
           ws.send(JSON.stringify({ v: 2, type: 'game.saveFailed', payload: {
@@ -1337,6 +1566,41 @@ export class RoomDurableObject {
           : { v: 2, type: 'error', payload: { code: 'STALE_CONNECTION' } }));
         return;
       }
+      if (player.adventure && await this.ctx.storage.get(`departure:${player.id}`)) return;
+      if (event.type === 'adventure.step') {
+        if (!player.adventure || event.v !== 3 || player.paused || !player.alive || !snakeState(action)) return;
+        const step = (action as { step?: number }).step;
+        if (step !== (player.adventureStep ?? 0) + 1) {
+          ws.send(JSON.stringify({ v: 3, type: 'adventure.state', payload: { entityId: player.entityId, step: player.adventureStep ?? 0, state: this.adventureSnake(player) } }));
+          return;
+        }
+        const previous = this.adventureSnake(player);
+        const next = moveAdventure(previous, action.direction);
+        if (!next || !samePosition(next.segments[0], action.segments[0])) {
+          ws.send(JSON.stringify({ v: 3, type: 'adventure.state', payload: { entityId: player.entityId, step: player.adventureStep ?? 0, state: previous } }));
+          return;
+        }
+        next.up = copy(action.up);
+        const eaten = state.food.findIndex(food => samePosition(food, next.segments[0]));
+        if (eaten >= 0) {
+          const removed = state.food.splice(eaten, 1)[0];
+          const effect = foodEffect(removed.kind);
+          next.score += effect.score; next.speed = Math.max(60, next.speed + effect.speed); next.growth += effect.growth;
+          const available = createSimulation(state.seed + state.tick).food.find(food => !state.food.some(p => samePosition(p, food)) && !Object.values(state.players).some(p => p.segments.some(s => samePosition(s, food))) && !this.definition(state).interactions.some(o => samePosition(o.position, food)));
+          if (available) state.food.push(available);
+        }
+        const triggered = applyInteractions(this.definition(state), next, 60000 / previous.speed);
+        if (!samePosition(player.direction, next.direction)) { player.direction = next.direction; this.recordDirection(state, player, previous.segments[0]); }
+        Object.assign(player, next, { adventureStep: step });
+        state.tick++;
+        const trajectory = state.trajectories?.[player.id];
+        if (trajectory && (triggered.length || eaten >= 0 || JSON.stringify(next.adventure.coatings) !== JSON.stringify(previous.adventure.coatings) || JSON.stringify(next.adventure.completed) !== JSON.stringify(previous.adventure.completed))) (trajectory.events ??= []).push({ step: step!, snake: copy(next) });
+        await this.persist(state);
+        this.broadcast({ v: 3, type: 'adventure.state', payload: { entityId: player.entityId, step: step!, state: next } });
+        if (eaten >= 0) this.broadcast({ v: 2, type: 'room.state', payload: this.snapshot(state) });
+        return;
+      }
+      if (player.adventure && (event.type === 'player.state' || event.type === 'player.directionChanged')) return;
       if (event.type === 'player.died' && !deathInput(action)) {
         if (deathSubmissionId) await this.saveStage(state.seed, player.id, deathSubmissionId, 'rejected', 'INVALID_DEATH_PAYLOAD');
         ws.send(JSON.stringify(deathSubmissionId
@@ -1426,11 +1690,13 @@ export class RoomDurableObject {
       /** UC 1: persist and broadcast a pause checkpoint without recording replay trajectory. */
       if (event.type === 'player.pauseChanged' && pauseInput(action)) {
         if (action.seq <= (player.lastStateSeq ?? -1)) return;
-        player.segments = action.segments;
-        player.direction = action.direction;
-        player.up = action.up;
-        player.score = action.score;
-        player.speed = action.speed;
+        if (!player.adventure) {
+          player.segments = action.segments;
+          player.direction = action.direction;
+          player.up = action.up;
+          player.score = action.score;
+          player.speed = action.speed;
+        }
         player.paused = action.paused;
         player.lastStateSeq = action.seq;
         await this.persist(state);
@@ -1469,8 +1735,7 @@ export class RoomDurableObject {
         player.segments = action.segments;
         player.direction = action.direction;
         player.up = action.up;
-        player.score = action.score;
-        player.speed = action.speed;
+        if (!player.adventure) { player.score = action.score; player.speed = action.speed; }
         player.lastStateSeq = action.seq;
         player.alive = false;
         state.tick++;

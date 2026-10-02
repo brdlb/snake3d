@@ -50,6 +50,7 @@ interface Pulse {
 }
 
 type RenderOpponent = {
+  adventure?: AdventureState;
   id: string;
   name: string;
   score: number;
@@ -77,8 +78,14 @@ import { createSnakePatternMesh, markSnakePatternsUpdated, setSnakePatternAt } f
 import { WallMaterial } from '../graphics/WallMaterial';
 import { TutorialSession, type TutorialCollectibleEffect } from '../tutorial/TutorialSession';
 import { TutorialUI } from '../ui/TutorialUI';
+import { advanceCoatings, applyInteractions, checkPortal, copy, personalPortals, requirementLabel, type AdventureSnake, type AdventureState, type RoomDefinition } from '../../shared/adventure';
+import { validateRoomDefinition } from '../../shared/adventureGeneration';
 
 export class Game {
+  private roomDefinition?: RoomDefinition;
+  private adventure?: AdventureState;
+  private adventurePending = false;
+  private adventurePendingSince = 0;
   private settingsManager: SettingsManager;
   private sceneManager: SceneManager;
   private cameraController: CameraController;
@@ -206,6 +213,9 @@ export class Game {
   }
 
   constructor(options: { tutorial?: boolean } = {}) {
+    if (new URLSearchParams(window.location.search).has('adventureDebug')) {
+      (window as unknown as { snakeAdventureGame: Game }).snakeAdventureGame = this;
+    }
     this.tutorialMode = options.tutorial === true;
     let savedAppearance: unknown;
     try { savedAppearance = JSON.parse(localStorage.getItem('snake3d_appearance') ?? 'null'); } catch { savedAppearance = null; }
@@ -376,6 +386,16 @@ export class Game {
     });
     this.networkManager.on('room.state', (snapshot: RoomSnapshot) => {
       if (!this.isRoomTransitionPending) this.applyLiveSnapshot(snapshot);
+    });
+    this.networkManager.on('adventure.state', (change: { entityId: string; step: number; state: SnakeState }) => {
+      if (change.entityId === this.localEntityId && !this.isRoomTransitionPending && !this.isGameOver) {
+        this.applyAdventureState(change.state);
+        this.playerTick = change.step;
+        this.adventurePending = false;
+        if (change.state.adventure) this.replayRecorder?.recordAdventure(change.step, change.state as AdventureSnake);
+      } else {
+        this.applyLiveState({ ...change.state, entityId: change.entityId, step: change.step, seq: change.step, reason: 'speed', serverTime: Date.now() });
+      }
     });
     this.networkManager.on('room.syncRequested', () => {
       if (this.liveWorld && !this.isSpectating && !this.isWaitingForStart &&
@@ -624,6 +644,9 @@ export class Game {
    * Инициализация комнаты с фантомами
    */
   private initializeRoom(data: RoomData): void {
+    this.roomDefinition = data.definition;
+    this.adventure = data.initialState?.adventure ? copy(data.initialState.adventure) : undefined;
+    this.adventurePending = false;
     this.liveWorld = this.networkManager.isConnected();
     this.liveOpponents = [];
     this.livePhantomReplays = new Map(
@@ -665,6 +688,7 @@ export class Game {
 
     // Сбрасываем змейку на выбранную точку спауна
     this.snake.reset(spawnPosition, spawnDirection);
+    if (data.initialState) this.applyAdventureState(data.initialState);
     this.cameraController.snapToTarget(this.snake.getHead(), this.snake.direction);
 
     // Phantoms are fully client-side replay entities. Their recorded input
@@ -715,6 +739,12 @@ export class Game {
       else initialDir.set(0, 0, Math.sign(initialDir.z));
       this.lastRecordedDirection.copy(initialDir);
       this.replayRecorder.start(initialDir, spawnPosition);
+      if (this.adventure) this.replayRecorder.setAdventureStart(this.livePlayerState() as AdventureSnake);
+    }
+    this.sceneManager.setAdventureObjects(this.roomDefinition);
+    this.hud.updateAdventure([]);
+    if (this.roomDefinition && new URLSearchParams(window.location.search).has('adventureDebug')) {
+      (window as unknown as { snakeAdventureDebug: () => unknown }).snakeAdventureDebug = () => validateRoomDefinition(this.roomDefinition!, this.livePlayerState() as AdventureSnake);
     }
   }
 
@@ -969,6 +999,15 @@ export class Game {
     );
     const localPlayer = findLocalPlayer(snapshot.players, this.localEntityId, me);
     this.localEntityId = localPlayer?.entityId ?? null;
+    if (snapshot.definition && JSON.stringify(this.roomDefinition) !== JSON.stringify(snapshot.definition)) {
+      this.roomDefinition = snapshot.definition;
+      this.sceneManager.setAdventureObjects(this.roomDefinition);
+    }
+    if (localPlayer?.adventure && !this.isGameOver) {
+      this.applyAdventureState(localPlayer);
+      this.playerTick = localPlayer.adventureStep ?? 0;
+      this.adventurePending = false;
+    }
     if (!this.localSnakeInitialized && localPlayer?.segments?.length && localPlayer.direction) {
       const direction = new THREE.Vector3(
         localPlayer.direction.x,
@@ -1038,6 +1077,7 @@ export class Game {
       phantom: player.phantom === true,
       color: player.color ?? '#ffffff',
       appearance: normalizeSnakeAppearance(player.appearance),
+      adventure: player.adventure ? copy(player.adventure) : undefined,
       segments,
       direction,
       directionVector,
@@ -1095,6 +1135,7 @@ export class Game {
     opponent.up.set(change.up.x, change.up.y, change.up.z).normalize();
     opponent.direction.copy(this.orientationQuaternion(opponent.directionVector, opponent.up));
     opponent.score = change.score;
+    if (change.adventure) opponent.adventure = copy(change.adventure);
     opponent.speed = Math.max(60, change.speed);
     opponent.elapsed = 0;
     opponent.serverTick = change.step;
@@ -1126,7 +1167,9 @@ export class Game {
       direction: this.positionData(direction.round()),
       up: this.positionData(up.round()),
       score: this.score,
-      speed: this.input.isActionPressed('boost') ? 1200 : this.currentSPM,
+      speed: !this.adventure && this.input.isActionPressed('boost') ? 1200 : this.currentSPM,
+      growth: this.snake.getPendingGrowth(),
+      ...(this.adventure ? { adventure: copy(this.adventure) } : {}),
     };
   }
 
@@ -1392,6 +1435,35 @@ export class Game {
     }
   }
 
+  private applyAdventureState(state: SnakeState): void {
+    if (!state.adventure) return;
+    this.adventure = copy(state.adventure);
+    this.snake.applyAuthoritativeState(state.segments.map(p => new THREE.Vector3(p.x, p.y, p.z)), this.orientationQuaternion(new THREE.Vector3(state.direction.x, state.direction.y, state.direction.z), new THREE.Vector3(state.up.x, state.up.y, state.up.z)), state.speed);
+    this.snake.setPendingGrowth(state.growth ?? 0);
+    this.score = state.score;
+    this.currentSPM = state.speed;
+    this.localSnakeInitialized = true;
+  }
+  private updateAdventureHud(): void {
+    if (!this.roomDefinition || !this.adventure) return;
+    const state = this.livePlayerState() as AdventureSnake;
+    const portals = personalPortals(this.roomDefinition, this.adventure);
+    this.sceneManager.setAdventurePortals(portals.map(p => {
+      const checked = checkPortal(this.roomDefinition!, p.direction, state);
+      return { direction: p.direction, enabled: p.enabled, open: checked.open, label: !p.enabled ? 'WORLD EDGE' : checked.returning ? 'FREE RETURN' : `${p.theme} ${p.tier} · ${checked.reason}` };
+    }));
+    const d = state.direction;
+    const direction: PortalDirection = d.x ? (d.x > 0 ? 'xp' : 'xn') : d.y ? (d.y > 0 ? 'yp' : 'yn') : d.z > 0 ? 'zp' : 'zn';
+    const portal = portals.find(p => p.direction === direction)!;
+    const checked = checkPortal(this.roomDefinition, direction, state);
+    const p = this.roomDefinition.coordinates;
+    this.hud.updateAdventure([
+      `${this.roomDefinition.themes.join(' / ')} · (${p.x}, ${p.y}, ${p.z})`,
+      `CHARGE ${this.adventure.charge}/12 · ${this.adventure.polarity}`,
+      `${direction.toUpperCase()} · ${portal.theme} ${portal.tier} · ${checked.reason}`,
+      ...(!portal.enabled || checked.returning ? [] : [portal.requirements.map(requirementLabel).join(' · '), `COST ${portal.chargeCost} CHARGE`]),
+    ]);
+  }
   private update(delta: number) {
     this.time += delta;
 
@@ -1402,8 +1474,11 @@ export class Game {
       return;
     }
 
-    const portalRemaining = Math.max(0, PORTAL_MIN_LENGTH - this.snake.segments.length);
-    this.sceneManager.setPortalProgress(portalRemaining, portalRemaining === 0);
+    if (this.roomDefinition && this.adventure) this.updateAdventureHud();
+    else {
+      const portalRemaining = Math.max(0, PORTAL_MIN_LENGTH - this.snake.segments.length);
+      this.sceneManager.setPortalProgress(portalRemaining, portalRemaining === 0);
+    }
     this.removeClearedRooms();
 
     // Если ожидаем нажатия кнопки "Старт" — только рендерим сцену
@@ -1456,6 +1531,12 @@ export class Game {
       this.cameraController.update(delta, head, this.snake.direction, 0);
       return;
     }
+    if (this.adventurePending) {
+      if (Date.now() - this.adventurePendingSince > 3000) { this.networkManager.requestResync(); this.adventurePendingSince = Date.now(); }
+      this.advanceLiveOpponents(delta);
+      this.cameraController.update(delta, this.snake.getHead(), this.snake.direction, 0);
+      return;
+    }
 
     // Stats Update
     this.gameStats.time += delta;
@@ -1473,7 +1554,7 @@ export class Game {
     }
 
     // Boost
-    const boosting = this.input.isActionPressed('boost');
+    const boosting = !this.adventure && this.input.isActionPressed('boost');
     if (boosting) {
       this.snake.setSpeed(0.05);
     } else {
@@ -1523,6 +1604,15 @@ export class Game {
 
       this.checkCollisions(preStepSegments);
       if (this.isRoomTransitionPending) return;
+      if (this.roomDefinition && this.adventure && !this.isGameOver) {
+        this.adventure.coatings = advanceCoatings(this.adventure.coatings, this.snake.segments.length);
+        const next = this.livePlayerState() as AdventureSnake;
+        applyInteractions(this.roomDefinition, next, 60000 / this.currentSPM);
+        this.applyAdventureState(next);
+        this.adventurePending = true;
+        this.adventurePendingSince = Date.now();
+        this.networkManager.sendAdventureStep({ ...next, step: this.playerTick });
+      }
 
       // Update Pathfinder on Step
       this.pathfinder.updatePathVisualization(
@@ -1562,7 +1652,7 @@ export class Game {
           }
           // Phantom made a step - check if it eats food
           const phantomHead = phantom.getHead();
-          const phantomFoodIndex = this.world.checkFoodCollision(phantomHead);
+          const phantomFoodIndex = phantom.adventure ? -1 : this.world.checkFoodCollision(phantomHead);
           if (phantomFoodIndex !== -1) {
             this.soundManager.playPickAt(this.world.foodPositions[phantomFoodIndex]);
             // Determine effects based on food color (same as player)
@@ -1812,7 +1902,21 @@ export class Game {
     const previousColors = this.world.foodColors.map((color) => color.clone());
     const fromSeed = this.currentSeed;
     try {
-      const room = await this.networkManager.requestPortal(fromSeed, direction, state);
+      const transferId = crypto.randomUUID();
+      let room: RoomData | undefined;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { room = await this.networkManager.requestPortal(fromSeed, direction, state, transferId); break; }
+        catch (error) {
+          if (error instanceof Error && error.message.includes('PORTAL_TRANSFER_PENDING')) {
+            this.hud.updateAdventure(['PORTAL TRANSFER PENDING']);
+            await new Promise(resolve => window.setTimeout(resolve, 500));
+            attempt--; continue;
+          }
+          if (error instanceof Error && error.message.startsWith('API 4')) throw error;
+          if (attempt === 2) throw error;
+        }
+      }
+      if (!room) throw new Error('PORTAL TRANSFER FAILED');
       const revisit = this.previousRooms.find((previous) => previous.seed === room.seed);
       if (revisit) {
         revisit.unwatch();
@@ -1848,6 +1952,7 @@ export class Game {
       this.replayRecorder?.setInitialScore(state.score);
       this.localSnakeInitialized = true;
       this.score = state.score;
+      if (room.initialState) this.applyAdventureState(room.initialState);
       this.cameraController.snapToTarget(this.snake.getHead(), this.snake.direction);
       void this.networkManager.waitForRoomState(room.seed).then((snapshot) =>
         this.applyLiveSnapshot(snapshot)).catch((error) => console.warn('[Game] Portal room state unavailable:', error));
@@ -1871,7 +1976,7 @@ export class Game {
       const portal = this.liveWorld && !this.isSpectating
         ? crossedPortal(this.positionData(head), this.snake.segments.length)
         : null;
-      if (portal) {
+      if (portal && (this.roomDefinition && this.adventure ? checkPortal(this.roomDefinition, portal, this.livePlayerState() as AdventureSnake).open : this.snake.segments.length >= PORTAL_MIN_LENGTH)) {
         void this.enterPortal(portal, preStepSegments);
         return;
       }
@@ -2273,8 +2378,16 @@ export class Game {
     try {
       if (this.networkManager.isConnected()) {
         try {
-          room = await this.networkManager.requestRoom(action, this.currentSeed);
+          for (;;) {
+            try { room = await this.networkManager.requestRoom(action, this.currentSeed); break; }
+            catch (error) {
+              if (!this.roomDefinition || !(error instanceof Error) || !error.message.includes('RESPAWN BLOCKED')) throw error;
+              this.gameOverUI.setLoading(true, 'RESPAWN BLOCKED');
+              await new Promise(resolve => window.setTimeout(resolve, 500));
+            }
+          }
         } catch (error) {
+          if (this.roomDefinition) throw error;
           console.warn(
             '[Game] Failed to enter the next online room, falling back to local game:',
             error,
@@ -2389,6 +2502,8 @@ export class Game {
         this.dummy.scale.set(1, 1, 1);
         this._color.setHex(0xffffff);
       }
+      if (this.adventure?.coatings[segmentIndex] === 'CONDUCTIVE') this._color.setHex(0x63cfff);
+      if (this.adventure?.coatings[segmentIndex] === 'INSULATED') this._color.setHex(0xfaa35c);
 
       // Apply Pulses
       for (const pulse of this.pulses) {
@@ -2440,7 +2555,8 @@ export class Game {
           this.dummy.updateMatrix();
 
           this.phantomMesh.setMatrixAt(phantomInstanceIndex, this.dummy.matrix);
-          setSnakePatternAt(this.phantomMesh, phantomInstanceIndex, phantom.appearance);
+          const coating = phantom.adventure?.coatings[segmentIndex];
+          setSnakePatternAt(this.phantomMesh, phantomInstanceIndex, coating && coating !== 'NORMAL' ? { ...phantom.appearance, patternColor: coating === 'CONDUCTIVE' ? '#63cfff' : '#faa35c' } : phantom.appearance);
           phantomInstanceIndex++;
         }
       }
@@ -2458,7 +2574,8 @@ export class Game {
           this.dummy.updateMatrix();
           const instanceIndex = opponent.phantom ? phantomInstanceIndex++ : livePlayerInstanceIndex++;
           mesh.setMatrixAt(instanceIndex, this.dummy.matrix);
-          setSnakePatternAt(mesh, instanceIndex, opponent.appearance);
+          const coating = opponent.adventure?.coatings[segmentIndex];
+          setSnakePatternAt(mesh, instanceIndex, coating && coating !== 'NORMAL' ? { ...opponent.appearance, patternColor: coating === 'CONDUCTIVE' ? '#63cfff' : '#faa35c' } : opponent.appearance);
         }
       }
 

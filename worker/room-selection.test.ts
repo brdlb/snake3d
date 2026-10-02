@@ -1,7 +1,8 @@
+import { ROOM_LIST_QUERY } from './roomQueries';
 import { describe, expect, it, vi } from 'vitest';
-import worker, { chooseSpawn, parseRoomSeed, replayReplacementOrder, ROOM_LIST_QUERY, RoomDurableObject } from './index';
+import worker, { chooseSpawn, parseRoomSeed, replayReplacementOrder, RoomDurableObject } from './index';
 import { addPlayer, createSimulation, safeSpawn } from '../shared/simulation';
-import { FIRST_ROOM_SEED, roomSeed } from '../shared/roomCoordinates';
+import { FIRST_ROOM_SEED, roomSeed, PORTAL_MIN_LENGTH } from '../shared/roomCoordinates';
 
 describe('portal room transfer', () => {
   const user = {
@@ -12,7 +13,7 @@ describe('portal room transfer', () => {
     segments, direction: { x: 1, y: 0, z: 0 }, up: { x: 0, y: 1, z: 0 }, score: 200, speed: 450,
   };
 
-  it('accepts a level-one opening only for a living assigned snake with 100 segments', async () => {
+  it('retains the legacy threshold when the adventure flag is disabled', async () => {
     const state = createSimulation(roomSeed({ x: 0, y: 0, z: 0 }));
     addPlayer(state, user.id, user.username, Date.now());
     const object = new RoomDurableObject({ storage: {}, getWebSockets: () => [] } as any, {} as any);
@@ -21,10 +22,10 @@ describe('portal room transfer', () => {
     const request = (length: number) => new Request('https://room/portal-check', {
       method: 'POST', body: JSON.stringify({ userId: user.id, state: { ...stateInput, segments: segments.slice(0, length) } }),
     });
-    expect((await object.fetch(request(99))).status).toBe(409);
-    const response = await object.fetch(request(100));
+    expect((await object.fetch(request(PORTAL_MIN_LENGTH - 1))).status).toBe(409);
+    const response = await object.fetch(request(PORTAL_MIN_LENGTH));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ length: 100 });
+    expect(await response.json()).toEqual({ length: PORTAL_MIN_LENGTH });
   });
 
   it('creates the destination player with the whole translated body, score and speed', async () => {

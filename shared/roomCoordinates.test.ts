@@ -15,9 +15,9 @@ describe('coordinate room addresses', () => {
     expect(generationSeed(123)).toBe(123);
   });
 
-  it('opens only the central cell of each face at 100 segments', () => {
+  it('detects portal geometry independently of snake length', () => {
     expect(PORTAL_APERTURE).toBe(1);
-    expect(crossedPortal({ x: 51, y: 25, z: 25 }, 99)).toBeNull();
+    expect(crossedPortal({ x: 51, y: 25, z: 25 }, 3)).toBe('xp');
     expect(crossedPortal({ x: 51, y: 25, z: 25 }, 100)).toBe('xp');
     expect(crossedPortal({ x: 51, y: 24, z: 25 }, 100)).toBeNull();
     expect(crossedPortal({ x: 51, y: 26, z: 25 }, 100)).toBeNull();

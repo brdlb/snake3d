@@ -7,7 +7,9 @@ A browser-based 3D Snake game built with TypeScript, Three.js, and Vite. The cur
 - Move through a 3D arena, collect three kinds of food, grow, and change speed.
 - Complete the first-run tutorial; restart it from Settings.
 - ENTER places every player in the first cube at `(0, 0, 0)`. Share a `?room=<seed>` link to enter a specific room and play alongside other players.
-- Coordinate rooms form a 3D grid. At length 20, the single central cell of each wall becomes a portal to the adjacent room. The new room appears when the head enters; earlier rooms remain visible until the body leaves them.
+- Coordinate rooms form a 3D grid with `z >= 0`. Five branches develop MASS (+X), TEMPO (-X), ENERGY (+Y), TUNING (-Y), and CIRCUIT (+Z). Each portal has its own requirements; the floor layer has no -Z exit. Earlier rooms remain visible until the body leaves them.
+- Convert length into charge, set polarity, use timed resources and ordered beacons, and bridge contacts with ordinary or coated body segments. Charge is limited to 12. Adventure mode uses base SPM, so the temporary boost control is disabled there.
+- Return for free along the entry route. RESTART restores the complete entry checkpoint of the current cube; an occupied checkpoint shows RESPAWN BLOCKED and waits for the other player to move.
 - Enter an invited room as a player or a spectator. Spectators can use a free camera or follow a snake.
 - Compare room records and view the leaderboard. Saved replays are kept for scores but do not spawn phantom snakes.
 - Play locally when the online service is unavailable. Offline results are stored in the browser.
@@ -47,7 +49,7 @@ npm run cf:dev
 
 Open the URL printed by Wrangler, usually `http://localhost:8787`. Use separate browser profiles or browsers to test multiple players, since a profile keeps its own session cookie. You can share a room by opening its `?room=<seed>` URL in another profile.
 
-After editing client code, run `npm run build` again so the Worker serves the updated `dist` assets. Wrangler handles Worker code changes during local development.
+After editing client code, run `npm run build` again and restart Wrangler so its asset manifest includes the new hashed filenames. Wrangler handles Worker code changes during local development.
 
 `VITE_API_URL` can override the API base URL for a separately hosted client. The default is `http://localhost:8787` during Vite development and the page's origin in a production build. The current Worker does not provide cross-origin API responses, so use the same-origin Worker URL for local online play.
 
@@ -70,7 +72,25 @@ After editing client code, run `npm run build` again so the Worker serves the up
 
 The server checks message structure and some movement rules, but it currently accepts client-reported positions, speed, and score. Treat room records and leaderboard results as casual-game results, not cheat-resistant rankings.
 
-Coordinate room IDs encode signed `(x, y, z)` positions and stay within JavaScript's safe integer range. `POST /api/v1/rooms` accepts `{ "x": 0, "y": 1, "z": -2 }` to create or retrieve a specific room, while an empty body creates the next room on the positive X axis. Portal travel uses `POST /api/v1/rooms/portal` and transfers the snake's full body, score, speed, and heading to the neighboring room. Older random-seed rooms remain accessible by their existing links but have no coordinate portals.
+Coordinate room IDs encode `(x, y, z)` positions and stay within JavaScript's safe integer range. X and Y may be negative; adventure rooms reject negative Z and legacy random-seed links. `POST /api/v1/rooms` accepts `{ "x": 0, "y": 1, "z": 2 }`, while an empty body creates a room on the positive X axis. Portal requests include a stable `transferId`; retries return the committed result without a second payment.
+
+### Adventure configuration and diagnostics
+
+`ADVENTURE_ENABLED` in `wrangler.jsonc` enables the new system. Apply `0010_adventures.sql` before enabling it on a database. Setting the flag to `false` retains the legacy 20-segment portal rules. New resources are confirmed by protocol-v3 `adventure.step` / `adventure.state` events; existing room events remain compatible with protocol v2. Movement and collision reporting are still client driven.
+
+`shared/adventure.ts` defines the versioned rules, 15 template tiers, and deterministic room geometry. `shared/adventureGeneration.ts` verifies a full-body route for each exit with a bounded search. Geometry is shared; thresholds depend on the entry profile. Generation tries 32 layouts before using a basic fallback. Incoming body profiles are checked separately; an unsuccessful bounded search returns `ENTRY_ROUTE_UNAVAILABLE` without charging or changing the source checkpoint. This is proof of the supplied route, not an exhaustive solver. Ordinary food is optional for these recipes.
+
+Open the game with `?adventureDebug=1` to expose `window.snakeAdventureDebug()` in the browser console. It reports route witnesses, rejected routes, and the currently active room's objective reachability. `window.snakeAdventureGame` is available only with this debug parameter.
+
+Additional checks:
+
+```bash
+npm run check:worker
+npm run cf:test
+npm run lint
+```
+
+For the local browser smoke, start Wrangler on port 8787 and a dedicated headless Chrome with `--remote-debugging-port=9223`, then run `npm run adventure:smoke`. It creates isolated users in the local database and tests resource confirmation, idempotent transfers, death saving, complete checkpoint restore, return travel, blocked respawn, the world boundary, and actual HUD rendering. Set `ADVENTURE_SCREENSHOT` to an output path to save its screenshot. Never point this test at a production database.
 
 ### Investigating a delayed game save
 
